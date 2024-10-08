@@ -31,6 +31,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
+from torch.utils.data import Subset
 import transformers
 from accelerate import Accelerator
 from accelerate.logging import get_logger
@@ -51,6 +52,8 @@ from diffusers.utils.import_utils import is_xformers_available
 import csv
 import time
 import copy
+
+from x0_dataset import x0_dataset, collate_fn
 
 # try to import wandb
 try:
@@ -195,6 +198,10 @@ def parse_args():
         default=None,
         help="The directory where the downloaded models and datasets will be stored.",
     )
+    
+    parser.add_argument("--cond_sharing", action='store_true', help='perform condition sharing')
+    parser.add_argument("--cond_share_lambda", type=float, default=5, help="condition share lambda")
+    
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
     parser.add_argument(
         "--resolution",
@@ -560,64 +567,69 @@ def main():
         eps=args.adam_epsilon,
     )
 
+    train_dataset = x0_dataset(data_dir=args.train_data_dir, n_T=noise_scheduler.num_train_timesteps, 
+                               cond_sharing=args.cond_sharing, cond_share_lambda=args.cond_share_lambda)
+    
     # Get the datasets. As the amount of data grows, the time taken by load_dataset also increases.
-    print("*** load dataset: start")
-    t0 = time.time()
-    dataset = load_dataset("imagefolder", data_dir=args.train_data_dir, split="train", verification_mode="no_checks")
-    print(f"*** load dataset: end --- {time.time()-t0} sec")
+    # print("*** load dataset: start")
+    # t0 = time.time()
+    # dataset = load_dataset("imagefolder", data_dir=args.train_data_dir, split="train", verification_mode="no_checks")
+    
+    # print(f"*** load dataset: end --- {time.time()-t0} sec")
+
+    # # Preprocessing the datasets.
+    # column_names = dataset.column_names
+    # image_column = column_names[0]
+    # caption_column = column_names[1]
+
+    # # Preprocessing the datasets.
+    # # We need to tokenize input captions and transform the images.
+    # def tokenize_captions(examples, is_train=True):
+    #     captions = []
+    #     for caption in examples[caption_column]:
+    #         if isinstance(caption, str):
+    #             captions.append(caption)
+    #         elif isinstance(caption, (list, np.ndarray)):
+    #             # take a random caption if there are multiple
+    #             captions.append(random.choice(caption) if is_train else caption[0])
+    #         else:
+    #             raise ValueError(
+    #                 f"Caption column `{caption_column}` should contain either strings or lists of strings."
+    #             )
+    #     inputs = tokenizer(
+    #         captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
+    #     )
+    #     return inputs.input_ids
 
     # Preprocessing the datasets.
-    column_names = dataset.column_names
-    image_column = column_names[0]
-    caption_column = column_names[1]
+    # train_transforms = transforms.Compose(
+    #     [
+    #         transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
+    #         transforms.CenterCrop(args.resolution) if args.center_crop else transforms.RandomCrop(args.resolution),
+    #         transforms.RandomHorizontalFlip() if args.random_flip else transforms.Lambda(lambda x: x),
+    #         transforms.ToTensor(),
+    #         transforms.Normalize([0.5], [0.5]),
+    #     ]
+    # )
 
-    # Preprocessing the datasets.
-    # We need to tokenize input captions and transform the images.
-    def tokenize_captions(examples, is_train=True):
-        captions = []
-        for caption in examples[caption_column]:
-            if isinstance(caption, str):
-                captions.append(caption)
-            elif isinstance(caption, (list, np.ndarray)):
-                # take a random caption if there are multiple
-                captions.append(random.choice(caption) if is_train else caption[0])
-            else:
-                raise ValueError(
-                    f"Caption column `{caption_column}` should contain either strings or lists of strings."
-                )
-        inputs = tokenizer(
-            captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
-        )
-        return inputs.input_ids
-
-    # Preprocessing the datasets.
-    train_transforms = transforms.Compose(
-        [
-            transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-            transforms.CenterCrop(args.resolution) if args.center_crop else transforms.RandomCrop(args.resolution),
-            transforms.RandomHorizontalFlip() if args.random_flip else transforms.Lambda(lambda x: x),
-            transforms.ToTensor(),
-            transforms.Normalize([0.5], [0.5]),
-        ]
-    )
-
-    def preprocess_train(examples):
-        images = [image.convert("RGB") for image in examples[image_column]]
-        examples["pixel_values"] = [train_transforms(image) for image in images]
-        examples["input_ids"] = tokenize_captions(examples)
-        return examples
+    # def preprocess_train(examples):
+    #     images = [image.convert("RGB") for image in examples[image_column]]
+    #     examples["pixel_values"] = [train_transforms(image) for image in images]
+    #     examples["input_ids"] = tokenize_captions(examples)
+    #     return examples
 
     with accelerator.main_process_first():
-        if args.max_train_samples is not None:
-            dataset = dataset.shuffle(seed=args.seed).select(range(args.max_train_samples))
-        # Set the training transforms
-        train_dataset = dataset.with_transform(preprocess_train)
+            if args.max_train_samples is not None:
+                indices = list(range(args.max_train_samples))
+                train_dataset = Subset(train_dataset, indices)
+        # # Set the training transforms
+        # train_dataset = dataset.with_transform(preprocess_train)
 
-    def collate_fn(examples):
-        pixel_values = torch.stack([example["pixel_values"] for example in examples])
-        pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-        input_ids = torch.stack([example["input_ids"] for example in examples])
-        return {"pixel_values": pixel_values, "input_ids": input_ids}
+    # def collate_fn(examples):
+    #     pixel_values = torch.stack([example["pixel_values"] for example in examples])
+    #     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
+    #     input_ids = torch.stack([example["input_ids"] for example in examples])
+    #     return {"pixel_values": pixel_values, "input_ids": input_ids}
 
     # DataLoaders creation:
     train_dataloader = torch.utils.data.DataLoader(
@@ -776,22 +788,20 @@ def main():
 
             with accelerator.accumulate(unet):
                 # Convert images to latent space
-                latents = vae.encode(batch["pixel_values"].to(weight_dtype)).latent_dist.sample()
-                latents = latents * vae.config.scaling_factor
+                latents = batch["latents"]
 
                 # Sample noise that we'll add to the latents
                 noise = torch.randn_like(latents)
                 bsz = latents.shape[0]
                 # Sample a random timestep for each image
-                timesteps = torch.randint(0, noise_scheduler.num_train_timesteps, (bsz,), device=latents.device)
-                timesteps = timesteps.long()
-
+                timesteps = batch["timesteps"]
+                
                 # Add noise to the latents according to the noise magnitude at each timestep
                 # (this is the forward diffusion process)
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
                 # Get the text embedding for conditioning
-                encoder_hidden_states = text_encoder(batch["input_ids"])[0]
+                encoder_hidden_states = batch["text_embs"]
 
                 # Get the target for loss depending on the prediction type
                 if noise_scheduler.config.prediction_type == "epsilon":
