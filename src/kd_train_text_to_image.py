@@ -75,6 +75,26 @@ def add_hook(net, mem, mapping_layers):
         if n in mapping_layers:
             m.register_forward_hook(get_activation(mem, n))
 
+########################################################################## MILL ##############################################################################################3
+def get_input_activation(mem, name):
+    def get_input_hook(module, input):
+        if isinstance(input, tuple):
+            print(input)
+        # input은 튜플일 수 있으므로 첫 번째 요소를 저장
+        mem[name] = input[0] if isinstance(input, tuple) else input
+        
+        print(f"Hooking input for {name}: type(input) = {type(input)}")
+        print(mem[name])
+    return get_input_hook
+
+def add_pre_hook(net, mem, mapping_layers):
+    for n, m in net.named_modules():
+        if n in mapping_layers:
+            # forward_pre_hook을 사용하여 입력값을 후킹
+            m.register_forward_pre_hook(get_input_activation(mem, n))
+########################################################################## MILL ##############################################################################################3
+
+
 def copy_weight_from_teacher(unet_stu, unet_tea, student_type):
 
     connect_info = {} # connect_info['TO-student'] = 'FROM-teacher'
@@ -202,7 +222,7 @@ def parse_args():
     parser.add_argument(
         "--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader."
     )
-    parser.add_argument("--num_train_epochs", type=int, default=100)
+    parser.add_argument("--num_train_epochs", type=int, default=1000)
     parser.add_argument(
         "--max_train_steps",
         type=int,
@@ -453,6 +473,7 @@ def main():
     text_encoder.requires_grad_(False)
     unet_teacher.requires_grad_(False)
 
+   
     # Create EMA for the unet.
     if args.use_ema:
         ema_unet = UNet2DConditionModel.from_config(config_student, revision=args.revision)
@@ -542,7 +563,7 @@ def main():
     # Get the datasets. As the amount of data grows, the time taken by load_dataset also increases.
     print("*** load dataset: start")
     t0 = time.time()
-    dataset = load_dataset("imagefolder", data_dir=args.train_data_dir, split="train")
+    dataset = load_dataset("imagefolder", data_dir=args.train_data_dir, split="train", verification_mode="no_checks")
     print(f"*** load dataset: end --- {time.time()-t0} sec")
 
     # Preprocessing the datasets.
@@ -700,8 +721,18 @@ def main():
     acts_tea = {}
     acts_stu = {}
     if args.unet_config_name in ["bk_base", "bk_small"]:
-        mapping_layers = ['up_blocks.0', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3',
-                        'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'down_blocks.3']    
+        # mapping_layers = ['up_blocks.0', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3',
+        #                 'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'down_blocks.3']
+        mapping_layers = [
+        'up_blocks.0.resnets.1',    # upsampler 직전의 첫 번째 업 블록
+        'up_blocks.1.resnets.1',    # upsampler 직전의 두 번째 업 블록
+        'up_blocks.2.resnets.1',    # upsampler 직전의 세 번째 업 블록
+        'up_blocks.3.resnets.1',     # upsampler 직전의 네 번째 업 블록
+        'down_blocks.0.resnets.0',  # downsampler 직전의 첫 번째 다운 블록
+        'down_blocks.1.resnets.0',  # downsampler 직전의 두 번째 다운 블록
+        'down_blocks.2.resnets.0',  # downsampler 직전의 세 번째 다운 블록
+        'down_blocks.3.resnets.0',  # downsampler 직전의 네 번째 다운 블록
+    ]    
         mapping_layers_tea = copy.deepcopy(mapping_layers)
         mapping_layers_stu = copy.deepcopy(mapping_layers)
 
@@ -720,6 +751,9 @@ def main():
     add_hook(unet_teacher, acts_tea, mapping_layers_tea)
     add_hook(unet, acts_stu, mapping_layers_stu)
 
+    # add_pre_hook(unet_teacher, acts_tea, mapping_layers_tea)
+    # add_pre_hook(unet, acts_stu, mapping_layers_stu)
+
     # get wandb_tracker (if it exists)
     wandb_tracker = accelerator.get_tracker("wandb")
 
@@ -731,6 +765,7 @@ def main():
         train_loss_sd = 0.0
         train_loss_kd_output = 0.0
         train_loss_kd_feat = 0.0
+       
 
         for step, batch in enumerate(train_dataloader):
             # Skip steps until we reach the resumed step
@@ -776,7 +811,9 @@ def main():
 
                 # Predict feature-KD loss
                 losses_kd_feat = []
+                print("##########################################################################################")
                 for (m_tea, m_stu) in zip(mapping_layers_tea, mapping_layers_stu):
+                    
                     a_tea = acts_tea[m_tea]
                     a_stu = acts_stu[m_stu]
 
@@ -785,6 +822,10 @@ def main():
 
                     tmp = F.mse_loss(a_stu.float(), a_tea.detach().float(), reduction="mean")
                     losses_kd_feat.append(tmp)
+                
+                    print(a_tea.shape)
+                print("##########################################################################################")
+
                 loss_kd_feat = sum(losses_kd_feat)
 
                 # Compute the final loss
