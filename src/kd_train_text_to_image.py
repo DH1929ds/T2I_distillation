@@ -180,7 +180,7 @@ def parse_args():
     parser.add_argument(
         "--max_train_samples",
         type=int,
-        default=None,
+        default=212766,
         help=(
             "For debugging purposes or quicker training, truncate the number of training examples to this "
             "value if set."
@@ -339,7 +339,7 @@ def parse_args():
     parser.add_argument(
         "--checkpointing_steps",
         type=int,
-        default=500,
+        default=50000,
         help=(
             "Save a checkpoint of the training state every X updates. These checkpoints are only suitable for resuming"
             " training using `--resume_from_checkpoint`."
@@ -374,7 +374,7 @@ def parse_args():
     parser.add_argument("--lambda_kd_output", type=float, default=1.0, help="weighting for output KD loss")  
     parser.add_argument("--lambda_kd_feat", type=float, default=1.0, help="weighting for feature KD loss")  
     parser.add_argument("--valid_prompt", type=str, default="a golden vase with different flowers")
-    parser.add_argument("--valid_steps", type=int, default=500)
+    parser.add_argument("--valid_steps", type=int, default=1000)
     parser.add_argument("--num_valid_images", type=int, default=2)
     parser.add_argument("--use_copy_weight_from_teacher", action="store_true", help="Whether to initialize unet student with teacher's weights",)
 
@@ -778,6 +778,10 @@ def main():
         train_loss_kd_output = 0.0
         train_loss_kd_feat = 0.0
        
+        print("############################################################################################")
+        print("max_train_steps: ",args.max_train_steps)
+        print("############################################################################################")
+
 
         for step, batch in enumerate(train_dataloader):
             # Skip steps until we reach the resumed step
@@ -788,7 +792,7 @@ def main():
 
             with accelerator.accumulate(unet):
                 # Convert images to latent space
-                latents = batch["latents"]
+                latents = batch["latents"].to(weight_dtype)
 
                 # Sample noise that we'll add to the latents
                 noise = torch.randn_like(latents)
@@ -801,7 +805,7 @@ def main():
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
                 # Get the text embedding for conditioning
-                encoder_hidden_states = batch["text_embs"]
+                encoder_hidden_states = batch["text_embs"].to(weight_dtype)
 
                 # Get the target for loss depending on the prediction type
                 if noise_scheduler.config.prediction_type == "epsilon":
@@ -821,7 +825,7 @@ def main():
 
                 # Predict feature-KD loss
                 losses_kd_feat = []
-                print("##########################################################################################")
+                #print("##########################################################################################")
                 for (m_tea, m_stu) in zip(mapping_layers_tea, mapping_layers_stu):
                     
                     a_tea = acts_tea[m_tea]
@@ -833,8 +837,8 @@ def main():
                     tmp = F.mse_loss(a_stu.float(), a_tea.detach().float(), reduction="mean")
                     losses_kd_feat.append(tmp)
                 
-                    print(a_tea.shape)
-                print("##########################################################################################")
+                    #print(a_tea.shape)
+                #print("##########################################################################################")
 
                 loss_kd_feat = sum(losses_kd_feat)
 

@@ -1,0 +1,8 @@
+*pt
+*pkl
+*csv
+data
+*.png
+*.bin
+wandb
+*__pycache__*

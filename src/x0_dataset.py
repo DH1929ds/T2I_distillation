@@ -3,6 +3,7 @@ import math
 import torch
 import pandas as pd
 from torch.utils.data import Dataset
+import random
 
 class x0_dataset(Dataset):
     def __init__(self, data_dir, n_T=1000, cond_sharing = False, cond_share_lambda=5):
@@ -46,6 +47,7 @@ class x0_dataset(Dataset):
     def __getitem__(self, idx):
         # 인덱스에 해당하는 데이터 파일들을 로드하여 반환합니다.
         index = self.data_indices[idx]
+        index = str(index).zfill(9)
 
         # 각 파일의 경로를 설정
         latent_path = os.path.join(self.data_dir, f"{index}_latent.pt")
@@ -57,7 +59,10 @@ class x0_dataset(Dataset):
             t_value = timestep.item()
             p = math.exp(-self.cond_share_lambda * (1 - t_value / self.n_T))
             if torch.rand(1).item() < p:
-                rand_index = torch.randint(0, len(self.data_indices), (1,)).item()
+                #rand_index = torch.randint(0, len(self.data_indices), (1,)).item()
+                random_idx = torch.randint(0, len(self.data_indices), (1,)).item()
+                rand_index = self.data_indices[random_idx]
+                rand_index = str(rand_index).zfill(9)
                 text_emb_path = os.path.join(self.data_dir, f"{rand_index}_text_emb.pt")
 
         latent_tensor = torch.load(latent_path)
