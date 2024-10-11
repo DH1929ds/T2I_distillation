@@ -6,3 +6,4 @@ data
 *.bin
 wandb
 *__pycache__*
+results
