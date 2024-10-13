@@ -57,9 +57,9 @@ class x0_dataset(Dataset):
                     else:
                         print(f"파일 {pq_file}에 'text' 컬럼이 없습니다. 건너뜁니다.")
                         continue
-
-                    # 텍스트 데이터를 리스트에 추가
-                    text_data_list.append(df[text_column])
+                    
+                    cleaned_text_data = df[text_column].dropna()  # NaN 또는 None 값을 제거
+                    text_data_list.append(cleaned_text_data)
 
                 except Exception as e:
                     print(f"파일 {pq_file}를 로드하는 중 에러 발생: {e}")
