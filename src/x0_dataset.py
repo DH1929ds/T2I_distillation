@@ -7,15 +7,17 @@ import random
 import numpy as np
 
 class x0_dataset(Dataset):
-    def __init__(self, data_dir, extra_text_dir=None, n_T=1000, cond_sharing = False, cond_share_lambda=5):
+    def __init__(self, data_dir, extra_text_dir=None, n_T=1000, random_conditioning = False, random_conditioning_lambda=5, world_size=1, rank=0):
         """
         Args:
             data_dir (str): 데이터가 저장된 폴더의 경로.
         """
         self.data_dir = data_dir
         self.n_T = n_T
-        self.cond_sharing = cond_sharing
-        self.cond_share_lambda = cond_share_lambda
+        self.random_conditioning = random_conditioning
+        self.random_conditioning_lambda = random_conditioning_lambda
+        self.world_size = world_size
+        self.rank = rank
         
         # 메타데이터 CSV 파일 로드
         metadata_path = os.path.join(data_dir, "metadata.csv")
@@ -40,10 +42,13 @@ class x0_dataset(Dataset):
             # extra_text_dir 내의 모든 Parquet 파일 목록을 가져옵니다.
             parquet_files = [os.path.join(extra_text_dir, f) for f in os.listdir(extra_text_dir) if f.endswith('.parquet')]
 
-            for pq_file in parquet_files:
+            rank_files = parquet_files[self.rank::self.world_size]
+            
+            for pq_file in rank_files:
                 # Parquet 파일 로드
                 try:
                     df = pd.read_parquet(pq_file)
+                    print(f"read parquet {pq_file}")
                     # 'text' 또는 'TEXT' 컬럼 확인
                     if 'text' in df.columns:
                         text_column = 'text'
@@ -83,9 +88,9 @@ class x0_dataset(Dataset):
         
         timestep = torch.randint(0, self.n_T, (1,)).long()        
         
-        if self.cond_sharing:
+        if self.random_conditioning:
             t_value = timestep.item()
-            p = math.exp(-self.cond_share_lambda * (1 - t_value / self.n_T))
+            p = math.exp(-self.random_conditioning_lambda * (1 - t_value / self.n_T))
             if torch.rand(1).item() < p:
                 #rand_index = torch.randint(0, len(self.data_indices), (1,)).item()
                 random_idx = torch.randint(0, len(self.text_data), (1,)).item()
