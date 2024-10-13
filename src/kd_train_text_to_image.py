@@ -178,6 +178,15 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--extra_text_dir",
+        type=str,
+        default=None,
+        help=(
+            "A folder containing the extra text data for random conditioning."
+        ),
+    )    
+    
+    parser.add_argument(
         "--max_train_samples",
         type=int,
         default=212766,
@@ -567,7 +576,7 @@ def main():
         eps=args.adam_epsilon,
     )
 
-    train_dataset = x0_dataset(data_dir=args.train_data_dir, n_T=noise_scheduler.num_train_timesteps, 
+    train_dataset = x0_dataset(data_dir=args.train_data_dir, extra_text_dir=args.extra_text_dir,n_T=noise_scheduler.num_train_timesteps, 
                                cond_sharing=args.cond_sharing, cond_share_lambda=args.cond_share_lambda)
     
     # Get the datasets. As the amount of data grows, the time taken by load_dataset also increases.
@@ -635,7 +644,7 @@ def main():
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         shuffle=True,
-        collate_fn=collate_fn,
+        collate_fn=collate_fn(tokenizer),
         batch_size=args.train_batch_size,
         num_workers=args.dataloader_num_workers,
     )
@@ -805,7 +814,8 @@ def main():
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
                 # Get the text embedding for conditioning
-                encoder_hidden_states = batch["text_embs"].to(weight_dtype)
+                encoder_hidden_states = text_encoder(batch["input_ids"])[0]
+                # encoder_hidden_states = batch["text_embs"].to(weight_dtype)
 
                 # Get the target for loss depending on the prediction type
                 if noise_scheduler.config.prediction_type == "epsilon":

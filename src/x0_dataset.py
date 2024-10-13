@@ -4,9 +4,10 @@ import torch
 import pandas as pd
 from torch.utils.data import Dataset
 import random
+import numpy as np
 
 class x0_dataset(Dataset):
-    def __init__(self, data_dir, n_T=1000, cond_sharing = False, cond_share_lambda=5):
+    def __init__(self, data_dir, extra_text_dir=None, n_T=1000, cond_sharing = False, cond_share_lambda=5):
         """
         Args:
             data_dir (str): 데이터가 저장된 폴더의 경로.
@@ -20,25 +21,49 @@ class x0_dataset(Dataset):
         metadata_path = os.path.join(data_dir, "metadata.csv")
         self.metadata = pd.read_csv(metadata_path)
         
-        # 폴더 내에 존재하는 파일들의 이름을 불러옵니다.
-        # 각 인덱스에 맞는 데이터들이 있는지 확인하기 위해 파일 이름의 공통 부분을 추출합니다.
-        self.data_indices = self._get_data_indices()
+        self.text_data = self._load_extra_text_data(extra_text_dir)
 
-    def _get_data_indices(self):
+    def _load_extra_text_data(self, extra_text_dir):
         """
-        데이터 디렉토리에서 인덱스에 맞는 파일을 확인하고, 유효한 인덱스 목록을 반환합니다.
+        추가 텍스트 데이터를 로드하고, 메타데이터의 텍스트와 결합하여 반환합니다.
+
+        Args:
+            extra_text_dir (str): 추가 텍스트 데이터가 저장된 폴더의 경로.
+
+        Returns:
+            pandas.Series: 모든 텍스트 데이터가 포함된 시리즈.
         """
-        # 폴더 내의 파일 리스트를 가져오고, 인덱스를 추출
-        files = os.listdir(self.data_dir)
-        indices = set()
+        # 메타데이터의 텍스트를 먼저 가져옵니다.
+        text_data_list = [self.metadata['text']]
 
-        for file_name in files:
-            # 파일 이름에서 인덱스를 추출 ('0_latent.pt', '0.txt' 등의 형식을 가정)
-            base_name = file_name.split("_")[0]
-            if base_name.isdigit():  # 숫자 인덱스가 존재할 때만 추가
-                indices.add(int(base_name))
+        if extra_text_dir is not None:
+            # extra_text_dir 내의 모든 Parquet 파일 목록을 가져옵니다.
+            parquet_files = [os.path.join(extra_text_dir, f) for f in os.listdir(extra_text_dir) if f.endswith('.parquet')]
 
-        return sorted(list(indices))  # 정렬된 인덱스 목록 반환
+            for pq_file in parquet_files:
+                # Parquet 파일 로드
+                try:
+                    df = pd.read_parquet(pq_file)
+                    # 'text' 또는 'TEXT' 컬럼 확인
+                    if 'text' in df.columns:
+                        text_column = 'text'
+                    elif 'TEXT' in df.columns:
+                        text_column = 'TEXT'
+                    else:
+                        print(f"파일 {pq_file}에 'text' 컬럼이 없습니다. 건너뜁니다.")
+                        continue
+
+                    # 텍스트 데이터를 리스트에 추가
+                    text_data_list.append(df[text_column])
+
+                except Exception as e:
+                    print(f"파일 {pq_file}를 로드하는 중 에러 발생: {e}")
+                    continue
+
+        # 모든 텍스트 데이터를 하나의 시리즈로 결합
+        combined_text_data = pd.concat(text_data_list, ignore_index=True)
+        return combined_text_data
+        
 
     def __len__(self):
         # 유효한 인덱스 개수를 반환합니다.
@@ -46,40 +71,58 @@ class x0_dataset(Dataset):
 
     def __getitem__(self, idx):
         # 인덱스에 해당하는 데이터 파일들을 로드하여 반환합니다.
-        index = self.data_indices[idx]
-        index = str(index).zfill(9)
+        metadata_row = self.metadata.iloc[idx]
+        file_name = metadata_row['file_name']
+        text = metadata_row['text']
 
-        # 각 파일의 경로를 설정
-        latent_path = os.path.join(self.data_dir, f"{index}_latent.pt")
-        text_emb_path = os.path.join(self.data_dir, f"{index}_text_emb.pt")
+        # Modify the file_name to get latent file name
+        latent_file_name = file_name.replace('.jpg', '_latent.pt')
+        latent_path = os.path.join(self.data_dir, latent_file_name)
         
-        timestep = torch.randint(0, self.n_T, (1,)).long()
+        latent_tensor = torch.load(latent_path)
+        
+        timestep = torch.randint(0, self.n_T, (1,)).long()        
         
         if self.cond_sharing:
             t_value = timestep.item()
             p = math.exp(-self.cond_share_lambda * (1 - t_value / self.n_T))
             if torch.rand(1).item() < p:
                 #rand_index = torch.randint(0, len(self.data_indices), (1,)).item()
-                random_idx = torch.randint(0, len(self.data_indices), (1,)).item()
-                rand_index = self.data_indices[random_idx]
-                rand_index = str(rand_index).zfill(9)
-                text_emb_path = os.path.join(self.data_dir, f"{rand_index}_text_emb.pt")
-
-        latent_tensor = torch.load(latent_path)
-        text_embedding_tensor = torch.load(text_emb_path)
-
-        return latent_tensor, text_embedding_tensor, timestep
+                random_idx = torch.randint(0, len(self.text_data), (1,)).item()
+                text = self.text_data[random_idx]
+                
 
 
-def collate_fn(batch):
-    latents, text_embs, timesteps = zip(*batch)
-    
-    latent_tensors = torch.stack(latents)
-    text_embedding_tensors = torch.stack(text_embs)
-    timesteps = torch.cat(timesteps)  # 타임스텝도 배치로 결합
+        return latent_tensor, text, timestep
 
-    return {
-        "latents": latent_tensors,
-        "text_embs": text_embedding_tensors,
-        "timesteps": timesteps   # timesteps 추가
-    }
+
+def collate_fn(tokenizer):
+    def collate(batch):
+        latents, texts, timesteps = zip(*batch)
+        
+        latent_tensors = torch.stack(latents)
+        timesteps = torch.cat(timesteps)
+
+        captions = []
+        for caption in texts:
+            if isinstance(caption, str):
+                captions.append(caption)
+            elif isinstance(caption, (list, np.ndarray)):
+                # take a random caption if there are multiple
+                captions.append(random.choice(caption))
+            else:
+                raise ValueError(
+                    f"Caption column `{caption}` should contain either strings or lists of strings."
+                )
+        inputs = tokenizer(
+            captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
+        )
+        
+        input_ids = inputs.input_ids
+
+        return {
+            "latents": latent_tensors,
+            "input_ids": input_ids,
+            "timesteps": timesteps
+        }
+    return collate
