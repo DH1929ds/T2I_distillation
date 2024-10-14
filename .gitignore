@@ -8,3 +8,4 @@ wandb
 *__pycache__*
 results
 mlruns
+.nfs*
