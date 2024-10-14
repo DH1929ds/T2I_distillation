@@ -78,7 +78,7 @@ def add_hook(net, mem, mapping_layers):
         if n in mapping_layers:
             m.register_forward_hook(get_activation(mem, n))
 
-########################################################################## MILL ##############################################################################################3
+########################################################################## MIIL ##############################################################################################3
 def get_input_activation(mem, name):
     def get_input_hook(module, input):
         if isinstance(input, tuple):
@@ -95,7 +95,7 @@ def add_pre_hook(net, mem, mapping_layers):
         if n in mapping_layers:
             # forward_pre_hook을 사용하여 입력값을 후킹
             m.register_forward_pre_hook(get_input_activation(mem, n))
-########################################################################## MILL ##############################################################################################3
+########################################################################## MIIL ##############################################################################################3
 
 
 def copy_weight_from_teacher(unet_stu, unet_tea, student_type):
@@ -178,6 +178,15 @@ def parse_args():
         ),
     )
     parser.add_argument(
+        "--extra_text_dir",
+        type=str,
+        default=None,
+        help=(
+            "A folder containing the extra text data for random conditioning."
+        ),
+    )    
+    
+    parser.add_argument(
         "--max_train_samples",
         type=int,
         default=212766,
@@ -199,8 +208,8 @@ def parse_args():
         help="The directory where the downloaded models and datasets will be stored.",
     )
     
-    parser.add_argument("--cond_sharing", action='store_true', help='perform condition sharing')
-    parser.add_argument("--cond_share_lambda", type=float, default=5, help="condition share lambda")
+    parser.add_argument("--random_conditioning", action='store_true', help='perform condition sharing')
+    parser.add_argument("--random_conditioning_lambda", type=float, default=5, help="condition share lambda")
     
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
     parser.add_argument(
@@ -413,7 +422,10 @@ def main():
         logging_dir=logging_dir,
         project_config=accelerator_project_config,
     )
-
+    
+    world_size = accelerator.num_processes  
+    local_rank = accelerator.local_process_index
+    
     # Add custom csv logger and validation image folder
     val_img_dir = os.path.join(args.output_dir, 'val_img')
     os.makedirs(val_img_dir, exist_ok=True)
@@ -567,8 +579,11 @@ def main():
         eps=args.adam_epsilon,
     )
 
-    train_dataset = x0_dataset(data_dir=args.train_data_dir, n_T=noise_scheduler.num_train_timesteps, 
-                               cond_sharing=args.cond_sharing, cond_share_lambda=args.cond_share_lambda)
+    # print('world_size', world_size)
+    # print('rank:', local_rank)
+    train_dataset = x0_dataset(data_dir=args.train_data_dir, extra_text_dir=args.extra_text_dir,n_T=noise_scheduler.num_train_timesteps, 
+                               random_conditioning=args.random_conditioning, random_conditioning_lambda=args.random_conditioning_lambda, 
+                               world_size=world_size, rank=local_rank)
     
     # Get the datasets. As the amount of data grows, the time taken by load_dataset also increases.
     # print("*** load dataset: start")
@@ -635,7 +650,7 @@ def main():
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         shuffle=True,
-        collate_fn=collate_fn,
+        collate_fn=collate_fn(tokenizer),
         batch_size=args.train_batch_size,
         num_workers=args.dataloader_num_workers,
     )
@@ -805,7 +820,8 @@ def main():
                 noisy_latents = noise_scheduler.add_noise(latents, noise, timesteps)
 
                 # Get the text embedding for conditioning
-                encoder_hidden_states = batch["text_embs"].to(weight_dtype)
+                encoder_hidden_states = text_encoder(batch["input_ids"])[0]
+                # encoder_hidden_states = batch["text_embs"].to(weight_dtype)
 
                 # Get the target for loss depending on the prediction type
                 if noise_scheduler.config.prediction_type == "epsilon":
@@ -817,7 +833,7 @@ def main():
 
                 # Predict the noise residual and compute loss
                 model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
-                loss_sd = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+                # loss_sd = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
                 # Predict output-KD loss
                 model_pred_teacher = unet_teacher(noisy_latents, timesteps, encoder_hidden_states).sample
@@ -843,14 +859,15 @@ def main():
                 loss_kd_feat = sum(losses_kd_feat)
 
                 # Compute the final loss
-                loss = args.lambda_sd * loss_sd + args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat
+                # loss = args.lambda_sd * loss_sd + args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat
+                loss = args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat
 
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
                 train_loss += avg_loss.item() / args.gradient_accumulation_steps
 
-                avg_loss_sd = accelerator.gather(loss_sd.repeat(args.train_batch_size)).mean()
-                train_loss_sd += avg_loss_sd.item() / args.gradient_accumulation_steps
+                # avg_loss_sd = accelerator.gather(loss_sd.repeat(args.train_batch_size)).mean()
+                # train_loss_sd += avg_loss_sd.item() / args.gradient_accumulation_steps
 
                 avg_loss_kd_output = accelerator.gather(loss_kd_output.repeat(args.train_batch_size)).mean()
                 train_loss_kd_output += avg_loss_kd_output.item() / args.gradient_accumulation_steps
@@ -875,7 +892,7 @@ def main():
                 accelerator.log(
                     {
                         "train_loss": train_loss, 
-                        "train_loss_sd": train_loss_sd,
+                        # "train_loss_sd": train_loss_sd,
                         "train_loss_kd_output": train_loss_kd_output,
                         "train_loss_kd_feat": train_loss_kd_feat,
                         "lr": lr_scheduler.get_last_lr()[0]
@@ -903,7 +920,7 @@ def main():
                         logger.info(f"Saved state to {save_path}")
 
             logs = {"step_loss": loss.detach().item(),
-                    "sd_loss": loss_sd.detach().item(),
+                    # "sd_loss": loss_sd.detach().item(),
                     "kd_output_loss": loss_kd_output.detach().item(),
                     "kd_feat_loss": loss_kd_feat.detach().item(),
                     "lr": lr_scheduler.get_last_lr()[0]}
