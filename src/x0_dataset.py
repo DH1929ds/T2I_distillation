@@ -95,7 +95,9 @@ class x0_dataset(Dataset):
                 #rand_index = torch.randint(0, len(self.data_indices), (1,)).item()
                 random_idx = torch.randint(0, len(self.text_data), (1,)).item()
                 text = self.text_data[random_idx]
-                
+        
+        if random.random() < 0.1:  # 10% 확률
+                text = ""                
 
 
         return latent_tensor, text, timestep

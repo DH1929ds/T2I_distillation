@@ -16,14 +16,20 @@
 # distributed under the License is distributed on an "AS IS" BASIS,
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
-
+import os
+os.environ['TORCH_NCCL_ASYNC_ERROR_HANDLING'] = '1'
+os.environ['TORCH_NCCL_BLOCKING_WAIT'] = '1'
+os.environ['NCCL_TIMEOUT'] = '3600'
+os.environ['NCCL_TIMEOUT_MS'] = '3600000'  # 개별 NCCL 작업의 타임아웃을 20분으로 설정
 import argparse
 import logging
 import math
-import os
 import random
 from pathlib import Path
 from typing import Optional
+import subprocess
+import sys
+import shutil
 
 import accelerate
 import datasets
@@ -41,6 +47,8 @@ from packaging import version
 from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
+from eval_clip_score_ddp import evaluate_clip_score
+from generate_ddp2 import sample_images_30k
 
 import diffusers
 from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel
@@ -54,6 +62,8 @@ import time
 import copy
 
 from x0_dataset import x0_dataset, collate_fn
+import warnings
+warnings.filterwarnings("ignore")
 
 # try to import wandb
 try:
@@ -386,6 +396,23 @@ def parse_args():
     parser.add_argument("--valid_steps", type=int, default=1000)
     parser.add_argument("--num_valid_images", type=int, default=2)
     parser.add_argument("--use_copy_weight_from_teacher", action="store_true", help="Whether to initialize unet student with teacher's weights",)
+    
+    # arguments for evaluation
+    parser.add_argument("--model_id", type=str, default="nota-ai/bk-sdm-base", help="Path to the pretrained model or checkpoint directory.")
+    parser.add_argument("--unet_path", type=str, default="/home/work/StableDiffusion/T2I_distill1_GPU4/results/toy_ddp_bk_base/checkpoint-25000", help="Model checkpoint for evaluate")
+    parser.add_argument("--img_sz", type=int, default=512)
+    parser.add_argument("--img_resz", type=int, default=256)
+    parser.add_argument("--num_inference_steps", type=int, default=25)
+    parser.add_argument("--batch_sz", type=int, default=25)    
+
+
+    parser.add_argument("--save_txt", type=str, default="./results/generated_images/im256_clip.txt")
+    parser.add_argument("--data_list", type=str, default="../T2I_distillation/data/mscoco_val2014_30k/metadata.csv")
+    parser.add_argument("--img_dir", type=str, default="./results/generated_images/im256")
+    parser.add_argument("--save_dir", type=str, default="./results/generated_images")
+    parser.add_argument('--clip_device', type=str, default='cuda', help='Device to use, cuda or cpu')
+    parser.add_argument('--clip_seed', type=int, default=1234, help='Random seed for reproducibility')
+    parser.add_argument('--clip_batch_size', type=int, default=50, help='Batch size for processing images')
 
     args = parser.parse_args()
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
@@ -579,8 +606,6 @@ def main():
         eps=args.adam_epsilon,
     )
 
-    # print('world_size', world_size)
-    # print('rank:', local_rank)
     train_dataset = x0_dataset(data_dir=args.train_data_dir, extra_text_dir=args.extra_text_dir,n_T=noise_scheduler.num_train_timesteps, 
                                random_conditioning=args.random_conditioning, random_conditioning_lambda=args.random_conditioning_lambda, 
                                world_size=world_size, rank=local_rank)
@@ -740,9 +765,17 @@ def main():
             first_epoch = global_step // num_update_steps_per_epoch
             resume_step = resume_global_step % (num_update_steps_per_epoch * args.gradient_accumulation_steps)
 
-    # Only show the progress bar once on each machine.
-    progress_bar = tqdm(range(global_step, args.max_train_steps), disable=not accelerator.is_local_main_process)
+    progress_bar = tqdm(
+    range(global_step, args.max_train_steps), 
+    initial=global_step,  # 초기값을 현재 global_step으로 설정
+    total=args.max_train_steps,  # 전체 스텝을 max_train_steps로 설정
+    disable=not accelerator.is_local_main_process,
+    dynamic_ncols=True
+)
     progress_bar.set_description("Steps")
+    # # Only show the progress bar once on each machine.
+    # progress_bar = tqdm(range(global_step, args.max_train_steps), disable=not accelerator.is_local_main_process)
+    # progress_bar.set_description("Steps")
 
     # Add hook for feature KD
     acts_tea = {}
@@ -792,11 +825,10 @@ def main():
         train_loss_sd = 0.0
         train_loss_kd_output = 0.0
         train_loss_kd_feat = 0.0
-       
+            
         print("############################################################################################")
         print("max_train_steps: ",args.max_train_steps)
         print("############################################################################################")
-
 
         for step, batch in enumerate(train_dataloader):
             # Skip steps until we reach the resumed step
@@ -830,10 +862,12 @@ def main():
                     target = noise_scheduler.get_velocity(latents, noise, timesteps)
                 else:
                     raise ValueError(f"Unknown prediction type {noise_scheduler.config.prediction_type}")
+                
+                ################################################## loss calculation ####################################################################
 
                 # Predict the noise residual and compute loss
                 model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
-                # loss_sd = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+                #loss_sd = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
 
                 # Predict output-KD loss
                 model_pred_teacher = unet_teacher(noisy_latents, timesteps, encoder_hidden_states).sample
@@ -861,6 +895,8 @@ def main():
                 # Compute the final loss
                 # loss = args.lambda_sd * loss_sd + args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat
                 loss = args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat
+
+                ################################################## loss calculation ####################################################################
 
                 # Gather the losses across all processes for logging (if we use distributed training).
                 avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
@@ -892,7 +928,7 @@ def main():
                 accelerator.log(
                     {
                         "train_loss": train_loss, 
-                        # "train_loss_sd": train_loss_sd,
+                        #"train_loss_sd": train_loss_sd,
                         "train_loss_kd_output": train_loss_kd_output,
                         "train_loss_kd_feat": train_loss_kd_feat,
                         "lr": lr_scheduler.get_last_lr()[0]
@@ -913,19 +949,90 @@ def main():
                 train_loss_kd_output = 0.0
                 train_loss_kd_feat = 0.0
 
+                # torch.cuda.empty_cache()
                 if global_step % args.checkpointing_steps == 0:
+                    save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                     if accelerator.is_main_process:
-                        save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                         accelerator.save_state(save_path)
                         logger.info(f"Saved state to {save_path}")
+                        os.makedirs(args.save_dir, exist_ok=True)
+                    accelerator.wait_for_everyone()
+                    
+                    ################################################# Evaluate IS, FID, CLIP SCORE #################################################
+                    sample_images_30k(args, accelerator, save_path)
+                    accelerator.wait_for_everyone()
+                    if accelerator.is_main_process:
+                        try:
+                            subprocess.run(["sh", "/home/work/StableDiffusion/T2I_distill2_GPU4/scripts/eval_scores_ddp.sh"], check=True, stdout=sys.stdout, stderr=sys.stderr )
+                        except subprocess.CalledProcessError as e:
+                            print(f"Error occurred while running script: {e}")
+
+                    # Wait for all ranks to complete the evaluation
+                    accelerator.wait_for_everyone()
+                    evaluate_clip_score(args, accelerator)
+                    accelerator.wait_for_everyone()
+                    ################################################# Evaluate IS, FID, CLIP SCORE #################################################
+
+                    # Read and log evaluation scores to WandB (main process only)
+                    if accelerator.is_main_process:
+                        is_txt_path = os.path.join(args.save_dir, "im256_is.txt")
+                        fid_txt_path = os.path.join(args.save_dir, "im256_fid.txt")
+                        clip_txt_path = os.path.join(args.save_dir, "im256_clip.txt")
+
+                        score_dict = {}
+
+                        # Read Inception Score (IS)
+                        try:
+                            with open(is_txt_path, "r") as f:
+                                lines = f.readlines()
+                                is_score = float(lines[-2].strip().split()[-1])
+                                score_dict["IS"] = is_score
+                        except FileNotFoundError:
+                            print(f"Warning: IS score file {is_txt_path} not found.")
+                            score_dict["IS"] = None
+
+                        # Read Fréchet Inception Distance (FID)
+                        try:
+                            with open(fid_txt_path, "r") as f:
+                                lines = f.readlines()
+                                fid_score = float(lines[0].strip().split()[-1])
+                                score_dict["FID"] = fid_score
+                        except FileNotFoundError:
+                            print(f"Warning: FID score file {fid_txt_path} not found.")
+                            score_dict["FID"] = None
+
+                        # Read CLIP Score
+                        try:
+                            with open(clip_txt_path, "r") as f:
+                                lines = f.readlines()
+                                clip_score = float(lines[0].strip().split()[-1])
+                                score_dict["CLIP"] = clip_score
+                        except FileNotFoundError:
+                            print(f"Warning: CLIP score file {clip_txt_path} not found.")
+                            score_dict["CLIP"] = None
+
+                        # Logging scores to WandB
+                        wandb.log(score_dict, step=global_step)
+
+                        # Print scores for verification
+                        print(f"Inception Score (IS): {score_dict['IS']}")
+                        print(f"Fréchet Inception Distance (FID): {score_dict['FID']}")
+                        print(f"CLIP Score: {score_dict['CLIP']}")
+
+                        try:
+                            shutil.rmtree(args.save_dir)
+                            print(f"All folders in {args.save_dir} have been deleted.")
+                        except Exception as e:
+                            print(f"Error occurred while deleting folders in {args.save_dir}: {e}")
+                    torch.cuda.empty_cache()
 
             logs = {"step_loss": loss.detach().item(),
-                    # "sd_loss": loss_sd.detach().item(),
+                    #"sd_loss": loss_sd.detach().item(),
                     "kd_output_loss": loss_kd_output.detach().item(),
                     "kd_feat_loss": loss_kd_feat.detach().item(),
                     "lr": lr_scheduler.get_last_lr()[0]}
             progress_bar.set_postfix(**logs)
-
+            accelerator.wait_for_everyone()
             # save validation images
             if (args.valid_prompt is not None) and (step % args.valid_steps == 0) and accelerator.is_main_process:
                 logger.info(
@@ -951,7 +1058,7 @@ def main():
                 # set `keep_fp32_wrapper` to True because we do not want to remove
                 # mixed precision hooks while we are still training
                 pipeline.unet = accelerator.unwrap_model(unet, keep_fp32_wrapper=True).to(accelerator.device)
-              
+            
                 for kk in range(args.num_valid_images):
                     image = pipeline(args.valid_prompt, num_inference_steps=25, generator=generator).images[0]
                     tmp_name = os.path.join(val_img_dir, f"gstep{global_step}_epoch{epoch}_step{step}_{kk}.png")
@@ -960,6 +1067,8 @@ def main():
 
                 del pipeline
                 torch.cuda.empty_cache()
+
+            accelerator.wait_for_everyone()
 
             if global_step >= args.max_train_steps:
                 break
