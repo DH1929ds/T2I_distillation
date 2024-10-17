@@ -24,8 +24,7 @@ def parse_args():
     parser.add_argument("--img_sz", type=int, default=512)
     parser.add_argument("--img_resz", type=int, default=256)
     parser.add_argument("--num_inference_steps", type=int, default=25)
-    parser.add_argument("--batch_sz", type=int, default=25)    
-
+    parser.add_argument("--batch_sz", type=int, default=64)    
 
     parser.add_argument("--save_txt", type=str, default="./results/generated_images/im256_clip.txt")
     parser.add_argument("--data_list", type=str, default="../T2I_distillation/data/mscoco_val2014_30k/metadata.csv")
@@ -38,6 +37,13 @@ def parse_args():
         
 def main():
     args = parse_args()
+    
+    # Check if evaluation_scores.txt already exists, if so, exit the script
+    scores_file_path = os.path.join(args.unet_path, "evaluation_scores.txt")
+    if os.path.exists(scores_file_path):
+        print(f"Evaluation scores already exist at {scores_file_path}. Exiting script.")
+        return  # Exit the script if the file exists
+    
     
     accelerator = Accelerator()
                   
@@ -93,17 +99,29 @@ def main():
         except FileNotFoundError:
             print(f"Warning: CLIP score file {clip_txt_path} not found.")
             score_dict["CLIP"] = None
-
-        # Print scores for verification
+            
         print(f"Inception Score (IS): {score_dict['IS']}")
         print(f"Fréchet Inception Distance (FID): {score_dict['FID']}")
         print(f"CLIP Score: {score_dict['CLIP']}")
+        
+        # Save scores to a text file in the unet_path directory
+        scores_file_path = os.path.join(args.unet_path, "evaluation_scores.txt")
+        try:
+            with open(scores_file_path, "w") as score_file:
+                score_file.write(f"Inception Score (IS): {score_dict['IS']}\n")
+                score_file.write(f"Fréchet Inception Distance (FID): {score_dict['FID']}\n")
+                score_file.write(f"CLIP Score: {score_dict['CLIP']}\n")
+            print(f"Scores saved to {scores_file_path}")
+        except Exception as e:
+            print(f"Error occurred while writing scores to {scores_file_path}: {e}")
 
+        # Optionally, clean up the generated images directory
         try:
             shutil.rmtree(args.save_dir)
             print(f"All folders in {args.save_dir} have been deleted.")
         except Exception as e:
             print(f"Error occurred while deleting folders in {args.save_dir}: {e}")
+
     torch.cuda.empty_cache()
 
     accelerator.end_training()
