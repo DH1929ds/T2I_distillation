@@ -14,6 +14,8 @@ def sample_images_30k(args, accelerator, save_path=None):
 
     pipeline = InferencePipeline(weight_folder=args.model_id, seed=args.clip_seed, device=device)
     pipeline.set_pipe_and_generator()
+    
+    pipeline.pipe.set_progress_bar_config(disable=True)
 
     if save_path is not None:  # use a separate trained unet for generation        
         from diffusers import UNet2DConditionModel 
@@ -36,7 +38,7 @@ def sample_images_30k(args, accelerator, save_path=None):
 
     # tqdm progress bar setup for rank 0 only
     if accelerator.is_main_process:
-        progress_bar = tqdm(total=num_batches, desc="Generating Images", disable=not accelerator.is_main_process)
+        progress_bar = tqdm(total=num_batches/accelerator.num_processes, desc="Generating Images", disable=not accelerator.is_main_process)
 
     for batch_idx in range(accelerator.process_index, num_batches, accelerator.num_processes):
         batch_start = batch_idx * args.batch_sz

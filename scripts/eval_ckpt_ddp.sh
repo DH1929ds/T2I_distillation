@@ -12,7 +12,9 @@ unet_paths="/home/work/StableDiffusion/T2I_400M_uncond/results/toy_ddp_bk_base/c
 /home/work/StableDiffusion/T2I_400M/results/toy_ddp_bk_base/checkpoint-25000,\
 /home/work/StableDiffusion/T2I_400M/results/toy_ddp_bk_base/checkpoint-50000,\
 /home/work/StableDiffusion/T2I_400M/results/toy_ddp_bk_base/checkpoint-75000,\
-/home/work/StableDiffusion/T2I_400M/results/toy_ddp_bk_base/checkpoint-100000"
+/home/work/StableDiffusion/T2I_400M/results/toy_ddp_bk_base/checkpoint-100000",\
+/home/work/StableDiffusion/T2I_distill1_GPU4/results/toy_ddp_bk_base/checkpoint-25000,\
+/home/work/StableDiffusion/T2I_distill1_GPU4/results/toy_ddp_bk_base/checkpoint-50000
 
 # 쉼표로 구분된 문자열을 배열로 변환
 IFS=',' read -r -a unet_path_array <<< "$unet_paths"
