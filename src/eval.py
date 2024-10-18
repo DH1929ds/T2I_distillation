@@ -123,8 +123,6 @@ def main():
             print(f"Error occurred while deleting folders in {args.save_dir}: {e}")
 
     torch.cuda.empty_cache()
-
-    accelerator.end_training()
-
+    
 if __name__ == "__main__":
     main()

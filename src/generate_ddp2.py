@@ -8,6 +8,7 @@ from utils.inference_pipeline import InferencePipeline
 from utils.misc import get_file_list_from_csv, change_img_size
 import contextlib
 import sys
+import math
 
 def sample_images_30k(args, accelerator, save_path=None):
     device = accelerator.device
@@ -51,10 +52,12 @@ def sample_images_30k(args, accelerator, save_path=None):
 
     # Get the list of files to process for this rank
     process_file_list = file_list[start_index:end_index]
-
+    
+    total_batches = math.ceil(len(process_file_list) / args.batch_sz)
+    
     # tqdm progress bar setup for rank 0 only
     if accelerator.is_main_process:
-        progress_bar = tqdm(total=len(process_file_list), desc="Generating Images", disable=not accelerator.is_main_process)
+        progress_bar = tqdm(total=total_batches, desc="Generating Images",ncols=None, disable=not accelerator.is_main_process)
 
     # Process the assigned files in batches
     for batch_start in range(0, len(process_file_list), args.batch_sz):
