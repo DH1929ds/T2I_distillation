@@ -397,6 +397,10 @@ def parse_args():
     parser.add_argument("--num_valid_images", type=int, default=2)
     parser.add_argument("--use_copy_weight_from_teacher", action="store_true", help="Whether to initialize unet student with teacher's weights",)
     
+    
+    parser.add_argument("--drop_text", action="store_true", help="distillation null text",)
+    parser.add_argument("--drop_text_p", type=float, default=5.0, help="null text ratio",)
+    
     # arguments for evaluation
     parser.add_argument("--model_id", type=str, default="nota-ai/bk-sdm-base", help="Path to the pretrained model or checkpoint directory.")
     parser.add_argument("--unet_path", type=str, default="/home/work/StableDiffusion/T2I_distill1_GPU4/results/toy_ddp_bk_base/checkpoint-25000", help="Model checkpoint for evaluate")
