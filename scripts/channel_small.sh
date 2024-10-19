@@ -7,11 +7,10 @@ MODEL_NAME="/home/work/StableDiffusion/stable-diffusion-v1-4"
 TRAIN_DATA_DIR="/home/work/StableDiffusion/T2I_distillation/data/laion_aes/pt_cache_212k" # 절대 경로로 설정]
 EXTRA_TEXT_DIR="/home/work/StableDiffusion/T2I_distillation/data/laion400m-meta"
 
-UNET_CONFIG_PATH="./src/unet_config"
-UNET_NAME="bk_base" # option: ["bk_base", "bk_small", "bk_tiny"]
+UNET_CONFIG_PATH="./src/unet_config_channel_small"
+UNET_NAME="original" # option: ["bk_base", "bk_small", "bk_tiny"]
 
-OUTPUT_DIR="./results/toy_ddp_"$UNET_NAME # please adjust it if needed
-MODEL_ID="nota-ai/bk-sdm-${UNET_NAME#bk_}"
+OUTPUT_DIR="./results/channel_small"$UNET_NAME # please adjust it if needed
 
 BATCH_SIZE=64
 GRAD_ACCUMULATION=1
@@ -39,7 +38,6 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch --multi_gpu --num_processes ${NUM
   --unet_config_path $UNET_CONFIG_PATH --unet_config_name $UNET_NAME \
   --output_dir $OUTPUT_DIR \
   --max_train_steps 400000 \
-  --model_id $MODEL_ID \
   --drop_text \
   --random_conditioning \
   --random_conditioning_lambda 5

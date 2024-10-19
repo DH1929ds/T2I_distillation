@@ -30,6 +30,7 @@ from typing import Optional
 import subprocess
 import sys
 import shutil
+import uuid
 
 import accelerate
 import datasets
@@ -62,6 +63,8 @@ import time
 import copy
 
 from x0_dataset import x0_dataset, collate_fn
+from funcs import MultiConv1x1, get_layer_output_channels
+
 import warnings
 warnings.filterwarnings("ignore")
 
@@ -212,6 +215,12 @@ def parse_args():
         help="The output directory where the model predictions and checkpoints will be written.",
     )
     parser.add_argument(
+        "--output_dir",
+        type=str,
+        default="sd-model-finetuned",
+        help="The output directory where the model predictions and checkpoints will be written.",
+    )
+    parser.add_argument(
         "--cache_dir",
         type=str,
         default=None,
@@ -348,7 +357,7 @@ def parse_args():
     parser.add_argument(
         "--report_to",
         type=str,
-        default="tensorboard",
+        default="wandb",
         help=(
             'The integration to report the results and logs to. Supported platforms are `"tensorboard"`'
             ' (default), `"wandb"` and `"comet_ml"`. Use `"all"` to report to all integrations.'
@@ -398,6 +407,9 @@ def parse_args():
     parser.add_argument("--use_copy_weight_from_teacher", action="store_true", help="Whether to initialize unet student with teacher's weights",)
     
     
+    parser.add_argument("--channel_mapping", action="store_true", help="channel mapping",)
+    
+    
     parser.add_argument("--drop_text", action="store_true", help="distillation null text",)
     parser.add_argument("--drop_text_p", type=float, default=5.0, help="null text ratio",)
     
@@ -442,10 +454,17 @@ def main():
                 " use `--variant=non_ema` instead."
             ),
         )
-    logging_dir = os.path.join(args.output_dir, args.logging_dir)
-
+        
+    run_id = uuid.uuid4().hex
+    
+    logging_dir = os.path.join(args.output_dir, args.logging_dir, f"run_{run_id}")
+    os.makedirs(logging_dir, exist_ok=True)
+    
+    wandb_dir = os.path.join(args.output_dir, "wandb_logs", f"run_{run_id}")
+    os.makedirs(wandb_dir, exist_ok=True)
+    
     accelerator_project_config = ProjectConfiguration(total_limit=args.checkpoints_total_limit)
-
+    
     accelerator = Accelerator(
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
@@ -602,6 +621,46 @@ def main():
     else:
         optimizer_cls = torch.optim.AdamW
 
+    # Add hook for feature KD
+    acts_tea = {}
+    acts_stu = {}
+    if args.unet_config_name in ["bk_base", "bk_small", 'original']:
+        # mapping_layers = ['up_blocks.0', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3',
+        #                 'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'down_blocks.3']
+        mapping_layers = [
+        'up_blocks.0.resnets.1',    # upsampler 직전의 첫 번째 업 블록
+        'up_blocks.1.resnets.1',    # upsampler 직전의 두 번째 업 블록
+        'up_blocks.2.resnets.1',    # upsampler 직전의 세 번째 업 블록
+        'up_blocks.3.resnets.1',     # upsampler 직전의 네 번째 업 블록
+        'down_blocks.0.resnets.0',  # downsampler 직전의 첫 번째 다운 블록
+        'down_blocks.1.resnets.0',  # downsampler 직전의 두 번째 다운 블록
+        'down_blocks.2.resnets.0',  # downsampler 직전의 세 번째 다운 블록
+        'down_blocks.3.resnets.0',  # downsampler 직전의 네 번째 다운 블록
+    ]    
+        mapping_layers_tea = copy.deepcopy(mapping_layers)
+        mapping_layers_stu = copy.deepcopy(mapping_layers)
+
+    elif args.unet_config_name in ["bk_tiny"]:
+        mapping_layers_tea = ['down_blocks.0', 'down_blocks.1', 'down_blocks.2.attentions.1.proj_out',
+                                'up_blocks.1', 'up_blocks.2', 'up_blocks.3']    
+        mapping_layers_stu = ['down_blocks.0', 'down_blocks.1', 'down_blocks.2.attentions.0.proj_out',
+                                'up_blocks.0', 'up_blocks.1', 'up_blocks.2']  
+
+    if torch.cuda.device_count() > 1:
+        print(f"use multi-gpu: # gpus {torch.cuda.device_count()}")
+        # revise the hooked feature names for student (to consider ddp wrapper)
+        for i, m_stu in enumerate(mapping_layers_stu):
+            mapping_layers_stu[i] = 'module.'+m_stu
+
+    add_hook(unet_teacher, acts_tea, mapping_layers_tea)
+    add_hook(unet, acts_stu, mapping_layers_stu)
+
+
+    if args.channel_mapping:
+        teacher_channels_list = get_layer_output_channels(unet_teacher, mapping_layers_tea)
+        student_channels_list = get_layer_output_channels(unet, mapping_layers_stu)
+        conv_layers = MultiConv1x1(student_channels_list, teacher_channels_list)
+        
     optimizer = optimizer_cls(
         unet.parameters(),
         lr=args.learning_rate,
@@ -613,67 +672,12 @@ def main():
     train_dataset = x0_dataset(data_dir=args.train_data_dir, extra_text_dir=args.extra_text_dir,n_T=noise_scheduler.num_train_timesteps, 
                                random_conditioning=args.random_conditioning, random_conditioning_lambda=args.random_conditioning_lambda, 
                                world_size=world_size, rank=local_rank)
-    
-    # Get the datasets. As the amount of data grows, the time taken by load_dataset also increases.
-    # print("*** load dataset: start")
-    # t0 = time.time()
-    # dataset = load_dataset("imagefolder", data_dir=args.train_data_dir, split="train", verification_mode="no_checks")
-    
-    # print(f"*** load dataset: end --- {time.time()-t0} sec")
 
-    # # Preprocessing the datasets.
-    # column_names = dataset.column_names
-    # image_column = column_names[0]
-    # caption_column = column_names[1]
-
-    # # Preprocessing the datasets.
-    # # We need to tokenize input captions and transform the images.
-    # def tokenize_captions(examples, is_train=True):
-    #     captions = []
-    #     for caption in examples[caption_column]:
-    #         if isinstance(caption, str):
-    #             captions.append(caption)
-    #         elif isinstance(caption, (list, np.ndarray)):
-    #             # take a random caption if there are multiple
-    #             captions.append(random.choice(caption) if is_train else caption[0])
-    #         else:
-    #             raise ValueError(
-    #                 f"Caption column `{caption_column}` should contain either strings or lists of strings."
-    #             )
-    #     inputs = tokenizer(
-    #         captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
-    #     )
-    #     return inputs.input_ids
-
-    # Preprocessing the datasets.
-    # train_transforms = transforms.Compose(
-    #     [
-    #         transforms.Resize(args.resolution, interpolation=transforms.InterpolationMode.BILINEAR),
-    #         transforms.CenterCrop(args.resolution) if args.center_crop else transforms.RandomCrop(args.resolution),
-    #         transforms.RandomHorizontalFlip() if args.random_flip else transforms.Lambda(lambda x: x),
-    #         transforms.ToTensor(),
-    #         transforms.Normalize([0.5], [0.5]),
-    #     ]
-    # )
-
-    # def preprocess_train(examples):
-    #     images = [image.convert("RGB") for image in examples[image_column]]
-    #     examples["pixel_values"] = [train_transforms(image) for image in images]
-    #     examples["input_ids"] = tokenize_captions(examples)
-    #     return examples
 
     with accelerator.main_process_first():
             if args.max_train_samples is not None:
                 indices = list(range(args.max_train_samples))
                 train_dataset = Subset(train_dataset, indices)
-        # # Set the training transforms
-        # train_dataset = dataset.with_transform(preprocess_train)
-
-    # def collate_fn(examples):
-    #     pixel_values = torch.stack([example["pixel_values"] for example in examples])
-    #     pixel_values = pixel_values.to(memory_format=torch.contiguous_format).float()
-    #     input_ids = torch.stack([example["input_ids"] for example in examples])
-    #     return {"pixel_values": pixel_values, "input_ids": input_ids}
 
     # DataLoaders creation:
     train_dataloader = torch.utils.data.DataLoader(
@@ -729,8 +733,12 @@ def main():
     # We need to initialize the trackers we use, and also store our configuration.
     # The trackers initializes automatically on the main process.
     if accelerator.is_main_process:
-        accelerator.init_trackers("text2image-fine-tune", config=vars(args))
-
+        accelerator.init_trackers(
+            "text2image-fine-tune",
+            config=vars(args),
+            init_kwargs={"wandb": {"dir": wandb_dir, "name": f"run_{run_id}"}}
+        )
+        
     # Train!
     total_batch_size = args.train_batch_size * accelerator.num_processes * args.gradient_accumulation_steps
 
@@ -777,46 +785,6 @@ def main():
     dynamic_ncols=True
 )
     progress_bar.set_description("Steps")
-    # # Only show the progress bar once on each machine.
-    # progress_bar = tqdm(range(global_step, args.max_train_steps), disable=not accelerator.is_local_main_process)
-    # progress_bar.set_description("Steps")
-
-    # Add hook for feature KD
-    acts_tea = {}
-    acts_stu = {}
-    if args.unet_config_name in ["bk_base", "bk_small"]:
-        # mapping_layers = ['up_blocks.0', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3',
-        #                 'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'down_blocks.3']
-        mapping_layers = [
-        'up_blocks.0.resnets.1',    # upsampler 직전의 첫 번째 업 블록
-        'up_blocks.1.resnets.1',    # upsampler 직전의 두 번째 업 블록
-        'up_blocks.2.resnets.1',    # upsampler 직전의 세 번째 업 블록
-        'up_blocks.3.resnets.1',     # upsampler 직전의 네 번째 업 블록
-        'down_blocks.0.resnets.0',  # downsampler 직전의 첫 번째 다운 블록
-        'down_blocks.1.resnets.0',  # downsampler 직전의 두 번째 다운 블록
-        'down_blocks.2.resnets.0',  # downsampler 직전의 세 번째 다운 블록
-        'down_blocks.3.resnets.0',  # downsampler 직전의 네 번째 다운 블록
-    ]    
-        mapping_layers_tea = copy.deepcopy(mapping_layers)
-        mapping_layers_stu = copy.deepcopy(mapping_layers)
-
-    elif args.unet_config_name in ["bk_tiny"]:
-        mapping_layers_tea = ['down_blocks.0', 'down_blocks.1', 'down_blocks.2.attentions.1.proj_out',
-                                'up_blocks.1', 'up_blocks.2', 'up_blocks.3']    
-        mapping_layers_stu = ['down_blocks.0', 'down_blocks.1', 'down_blocks.2.attentions.0.proj_out',
-                                'up_blocks.0', 'up_blocks.1', 'up_blocks.2']  
-
-    if torch.cuda.device_count() > 1:
-        print(f"use multi-gpu: # gpus {torch.cuda.device_count()}")
-        # revise the hooked feature names for student (to consider ddp wrapper)
-        for i, m_stu in enumerate(mapping_layers_stu):
-            mapping_layers_stu[i] = 'module.'+m_stu
-
-    add_hook(unet_teacher, acts_tea, mapping_layers_tea)
-    add_hook(unet, acts_stu, mapping_layers_stu)
-
-    # add_pre_hook(unet_teacher, acts_tea, mapping_layers_tea)
-    # add_pre_hook(unet, acts_stu, mapping_layers_stu)
 
     # get wandb_tracker (if it exists)
     wandb_tracker = accelerator.get_tracker("wandb")
@@ -829,10 +797,6 @@ def main():
         train_loss_sd = 0.0
         train_loss_kd_output = 0.0
         train_loss_kd_feat = 0.0
-            
-        print("############################################################################################")
-        print("max_train_steps: ",args.max_train_steps)
-        print("############################################################################################")
 
         for step, batch in enumerate(train_dataloader):
             # Skip steps until we reach the resumed step
@@ -847,7 +811,6 @@ def main():
 
                 # Sample noise that we'll add to the latents
                 noise = torch.randn_like(latents)
-                bsz = latents.shape[0]
                 # Sample a random timestep for each image
                 timesteps = batch["timesteps"]
                 
@@ -880,14 +843,17 @@ def main():
                 # Predict feature-KD loss
                 losses_kd_feat = []
                 #print("##########################################################################################")
-                for (m_tea, m_stu) in zip(mapping_layers_tea, mapping_layers_stu):
+                for i, (m_tea, m_stu) in enumerate(zip(mapping_layers_tea, mapping_layers_stu)):
                     
                     a_tea = acts_tea[m_tea]
                     a_stu = acts_stu[m_stu]
 
                     if type(a_tea) is tuple: a_tea = a_tea[0]                        
                     if type(a_stu) is tuple: a_stu = a_stu[0]
-
+                    
+                    if args.channel_mapping:
+                        a_stu = conv_layers.convs[i](a_stu)
+                     
                     tmp = F.mse_loss(a_stu.float(), a_tea.detach().float(), reduction="mean")
                     losses_kd_feat.append(tmp)
                 
