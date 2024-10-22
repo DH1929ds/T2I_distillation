@@ -31,15 +31,15 @@ def evaluate_clip_score(args, accelerator):
     local_file_list = file_list[start_idx:end_idx]
 
     score_arr = []
-    print("#############################################################################")
-    print(args.img_dir)
-    print("#############################################################################")
+
+    # Use args.save_dir/im256 instead of args.img_dir
+    img_save_dir = os.path.join(args.save_dir, 'im256')
 
     for batch_start in range(0, len(local_file_list), args.clip_batch_size):
         batch_end = min(batch_start + args.clip_batch_size, len(local_file_list))
         batch_files = local_file_list[batch_start:batch_end]
 
-        img_paths = [os.path.join(args.img_dir, file_info[0]) for file_info in batch_files]
+        img_paths = [os.path.join(img_save_dir, file_info[0]) for file_info in batch_files]
         val_prompts = [file_info[1] for file_info in batch_files]
         texts = tokenizer(val_prompts).to(device)
 
@@ -73,7 +73,9 @@ def evaluate_clip_score(args, accelerator):
     # Save results (only on process 0)
     if accelerator.is_main_process:
         final_score = sum(all_scores) / len(all_scores)
-        with open(args.save_txt, 'w') as f:
+        # Save result in args.save_dir/im256_clip.txt
+        save_path = os.path.join(args.save_dir, 'im256_clip.txt')
+        with open(save_path, 'w') as f:
             f.write(f"FINAL clip score {final_score}\n")
             f.write(f"-- sum score {sum(all_scores)}\n")
             f.write(f"-- len {len(all_scores)}\n")

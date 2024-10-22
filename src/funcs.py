@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 
@@ -35,11 +36,29 @@ class MultiConv1x1(nn.Module):
         output_list = [conv(x) for conv, x in zip(self.convs, x_list)]
         return output_list
     
+
+    def save_pretrained(self, save_directory):
+        os.makedirs(save_directory, exist_ok=True)
+        save_path = os.path.join(save_directory, 'pytorch_model.bin')
+        torch.save(self.state_dict(), save_path)
+        # 필요한 경우 config 저장
+        # 예: torch.save(self.config, os.path.join(save_directory, 'config.bin'))
+
+    @classmethod
+    def from_pretrained(cls, load_directory, student_channels_list, teacher_channels_list):
+        model = cls(student_channels_list, teacher_channels_list)
+        load_path = os.path.join(load_directory, 'pytorch_model.bin')
+        state_dict = torch.load(load_path)
+        model.load_state_dict(state_dict)
+        return model
+    
     
 def get_layer_output_channels(model, mapping_layers):
     channels_list = []
     for layer_name in mapping_layers:
         layer = dict(model.named_modules())[layer_name]  # 해당 레이어 가져오기
+        # print(f"Layer '{layer_name}': {layer}")
+        # print(f"Available attributes: {dir(layer)}")
         if isinstance(layer, nn.Conv2d):  # Conv 레이어일 경우
             channels_list.append(layer.out_channels)
         elif isinstance(layer, nn.BatchNorm2d):  # BatchNorm일 경우, num_features는 채널 크기
@@ -49,3 +68,7 @@ def get_layer_output_channels(model, mapping_layers):
         else:
             raise ValueError(f"Layer {layer_name} does not have 'out_channels' or similar property.")
     return channels_list
+
+
+def count_parameters(model):
+    return sum(p.numel() for p in model.parameters())

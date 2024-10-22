@@ -31,6 +31,7 @@ import subprocess
 import sys
 import shutil
 import uuid
+from datetime import timedelta
 
 import accelerate
 import datasets
@@ -40,7 +41,7 @@ import torch.nn.functional as F
 import torch.utils.checkpoint
 from torch.utils.data import Subset
 import transformers
-from accelerate import Accelerator
+from accelerate import Accelerator, InitProcessGroupKwargs
 from accelerate.logging import get_logger
 from accelerate.utils import ProjectConfiguration, set_seed
 from datasets import load_dataset
@@ -63,7 +64,7 @@ import time
 import copy
 
 from x0_dataset import x0_dataset, collate_fn
-from funcs import MultiConv1x1, get_layer_output_channels
+from funcs import MultiConv1x1, get_layer_output_channels, count_parameters
 
 import warnings
 warnings.filterwarnings("ignore")
@@ -207,12 +208,6 @@ def parse_args():
             "For debugging purposes or quicker training, truncate the number of training examples to this "
             "value if set."
         ),
-    )
-    parser.add_argument(
-        "--output_dir",
-        type=str,
-        default="sd-model-finetuned",
-        help="The output directory where the model predictions and checkpoints will be written.",
     )
     parser.add_argument(
         "--output_dir",
@@ -397,7 +392,7 @@ def parse_args():
     )
 
     parser.add_argument("--unet_config_path", type=str, default="./src/unet_config")     
-    parser.add_argument("--unet_config_name", type=str, default="bk_small", choices=["bk_base", "bk_small", "bk_tiny"])   
+    parser.add_argument("--unet_config_name", type=str, default="bk_small", choices=["bk_base", "bk_small", "bk_tiny","original"])   
     parser.add_argument("--lambda_sd", type=float, default=1.0, help="weighting for the denoising task loss")  
     parser.add_argument("--lambda_kd_output", type=float, default=1.0, help="weighting for output KD loss")  
     parser.add_argument("--lambda_kd_feat", type=float, default=1.0, help="weighting for feature KD loss")  
@@ -422,15 +417,15 @@ def parse_args():
     parser.add_argument("--batch_sz", type=int, default=25)    
 
 
-    parser.add_argument("--save_txt", type=str, default="./results/generated_images/im256_clip.txt")
     parser.add_argument("--data_list", type=str, default="../T2I_distillation/data/mscoco_val2014_30k/metadata.csv")
-    parser.add_argument("--img_dir", type=str, default="./results/generated_images/im256")
-    parser.add_argument("--save_dir", type=str, default="./results/generated_images")
     parser.add_argument('--clip_device', type=str, default='cuda', help='Device to use, cuda or cpu')
     parser.add_argument('--clip_seed', type=int, default=1234, help='Random seed for reproducibility')
     parser.add_argument('--clip_batch_size', type=int, default=50, help='Batch size for processing images')
 
     args = parser.parse_args()
+    
+    args.save_dir = os.path.join(args.output_dir, "generated_images")
+    
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
         args.local_rank = env_local_rank
@@ -465,7 +460,12 @@ def main():
     
     accelerator_project_config = ProjectConfiguration(total_limit=args.checkpoints_total_limit)
     
+    ipg_handler = InitProcessGroupKwargs(
+            timeout=timedelta(seconds=5400)
+            )
+    
     accelerator = Accelerator(
+        kwargs_handlers=[ipg_handler],
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         mixed_precision=args.mixed_precision,
         log_with=args.report_to,
@@ -569,7 +569,12 @@ def main():
                 ema_unet.save_pretrained(os.path.join(output_dir, "unet_ema"))
 
             for i, model in enumerate(models):
-                model.save_pretrained(os.path.join(output_dir, "unet"))
+                if isinstance(model, UNet2DConditionModel):
+                    model.save_pretrained(os.path.join(output_dir, "unet"))
+                elif isinstance(model, MultiConv1x1):
+                    model.save_pretrained(os.path.join(output_dir, "conv_layers"))
+                else:
+                    print(f"Warning: model of type {type(model)} is not handled in save_model_hook")
 
                 # make sure to pop weight so that corresponding model is not saved again
                 weights.pop()
@@ -585,12 +590,25 @@ def main():
                 # pop models so that they are not loaded again
                 model = models.pop()
 
-                # load diffusers style into model
-                load_model = UNet2DConditionModel.from_pretrained(input_dir, subfolder="unet")
-                model.register_to_config(**load_model.config)
+                if isinstance(model, UNet2DConditionModel):
+                    # load diffusers style into model
+                    load_model = UNet2DConditionModel.from_pretrained(input_dir, subfolder="unet")
+                    model.register_to_config(**load_model.config)
+                    model.load_state_dict(load_model.state_dict())
+                    del load_model
+                elif isinstance(model, MultiConv1x1):
+                    # student_channels_list와 teacher_channels_list를 다시 생성해야 합니다.
+                    # 이를 위해 필요한 정보를 args나 다른 곳에서 가져옵니다.
+                    teacher_channels_list = get_layer_output_channels(unet_teacher, mapping_layers_tea)
+                    student_channels_list = get_layer_output_channels(unet, mapping_layers_stu)
+                    # MultiConv1x1 모델 로드
+                    load_model = MultiConv1x1.from_pretrained(os.path.join(input_dir, "conv_layers"),
+                                                            student_channels_list, teacher_channels_list)
+                    model.load_state_dict(load_model.state_dict())
+                    del load_model
+                else:
+                    print(f"Warning: model of type {type(model)} is not handled in load_model_hook")
 
-                model.load_state_dict(load_model.state_dict())
-                del load_model
 
         accelerator.register_save_state_pre_hook(save_model_hook)
         accelerator.register_load_state_pre_hook(load_model_hook)
@@ -624,45 +642,102 @@ def main():
     # Add hook for feature KD
     acts_tea = {}
     acts_stu = {}
-    if args.unet_config_name in ["bk_base", "bk_small", 'original']:
-        # mapping_layers = ['up_blocks.0', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3',
-        #                 'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'down_blocks.3']
+    
+    if args.unet_config_name in ['original']:
+        
         mapping_layers = [
-        'up_blocks.0.resnets.1',    # upsampler 직전의 첫 번째 업 블록
-        'up_blocks.1.resnets.1',    # upsampler 직전의 두 번째 업 블록
-        'up_blocks.2.resnets.1',    # upsampler 직전의 세 번째 업 블록
-        'up_blocks.3.resnets.1',     # upsampler 직전의 네 번째 업 블록
-        'down_blocks.0.resnets.0',  # downsampler 직전의 첫 번째 다운 블록
-        'down_blocks.1.resnets.0',  # downsampler 직전의 두 번째 다운 블록
-        'down_blocks.2.resnets.0',  # downsampler 직전의 세 번째 다운 블록
-        'down_blocks.3.resnets.0',  # downsampler 직전의 네 번째 다운 블록
-    ]    
+        'up_blocks.0.resnets.2',    # upsampler 직전의 첫 번째 업 블록
+        'up_blocks.1.attentions.2.proj_out',    # upsampler 직전의 두 번째 업 블록
+        'up_blocks.2.attentions.2.proj_out',    # upsampler 직전의 세 번째 업 블록
+        'up_blocks.3.attentions.2.proj_out',     # upsampler 직전의 네 번째 업 블록
+        'down_blocks.0.attentions.1.proj_out',  # downsampler 직전의 첫 번째 다운 블록
+        'down_blocks.1.attentions.1.proj_out',  # downsampler 직전의 두 번째 다운 블록
+        'down_blocks.2.attentions.1.proj_out',  # downsampler 직전의 세 번째 다운 블록
+        'down_blocks.3.resnets.1',  # downsampler 직전의 네 번째 다운 블록
+    ]
         mapping_layers_tea = copy.deepcopy(mapping_layers)
         mapping_layers_stu = copy.deepcopy(mapping_layers)
+        
+    elif args.unet_config_name in ["bk_base", "bk_small"]:
+        # mapping_layers = ['up_blocks.0', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3',
+        #                 'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'down_blocks.3']
+        
+        # mapping_layers_tea = copy.deepcopy(mapping_layers)
+        # mapping_layers_stu = copy.deepcopy(mapping_layers)
+
+    #     mapping_layers = [
+    #     'up_blocks.0.resnets.1',    # upsampler 직전의 첫 번째 업 블록
+    #     'up_blocks.1.resnets.1',    # upsampler 직전의 두 번째 업 블록
+    #     'up_blocks.2.resnets.1',    # upsampler 직전의 세 번째 업 블록
+    #     'up_blocks.3.resnets.1',     # upsampler 직전의 네 번째 업 블록
+    #     'down_blocks.0.resnets.0',  # downsampler 직전의 첫 번째 다운 블록
+    #     'down_blocks.1.resnets.0',  # downsampler 직전의 두 번째 다운 블록
+    #     'down_blocks.2.resnets.0',  # downsampler 직전의 세 번째 다운 블록
+    #     'down_blocks.3.resnets.0',  # downsampler 직전의 네 번째 다운 블록
+    # ]    
+        mapping_layers_tea = [
+        'up_blocks.0.resnets.2',    # upsampler 직전의 첫 번째 업 블록
+        'up_blocks.1.attentions.2.proj_out',    # upsampler 직전의 두 번째 업 블록
+        'up_blocks.2.attentions.2.proj_out',    # upsampler 직전의 세 번째 업 블록
+        'up_blocks.3.attentions.2.proj_out',     # upsampler 직전의 네 번째 업 블록
+        'down_blocks.0.attentions.1.proj_out',  # downsampler 직전의 첫 번째 다운 블록
+        'down_blocks.1.attentions.1.proj_out',  # downsampler 직전의 두 번째 다운 블록
+        'down_blocks.2.attentions.1.proj_out',  # downsampler 직전의 세 번째 다운 블록
+        'down_blocks.3.resnets.1',  # downsampler 직전의 네 번째 다운 블록
+    ]
+        mapping_layers_stu = [
+        'up_blocks.0.resnets.1',    # upsampler 직전의 첫 번째 업 블록
+        'up_blocks.1.attentions.1.proj_out',    # upsampler 직전의 두 번째 업 블록
+        'up_blocks.2.attentions.1.proj_out',    # upsampler 직전의 세 번째 업 블록
+        'up_blocks.3.attentions.1.proj_out',     # upsampler 직전의 네 번째 업 블록
+        'down_blocks.0.attentions.0.proj_out',  # downsampler 직전의 첫 번째 다운 블록
+        'down_blocks.1.attentions.0.proj_out',  # downsampler 직전의 두 번째 다운 블록
+        'down_blocks.2.attentions.0.proj_out',  # downsampler 직전의 세 번째 다운 블록
+        'down_blocks.3.resnets.0',  # downsampler 직전의 네 번째 다운 블록
+    ]    
 
     elif args.unet_config_name in ["bk_tiny"]:
-        mapping_layers_tea = ['down_blocks.0', 'down_blocks.1', 'down_blocks.2.attentions.1.proj_out',
-                                'up_blocks.1', 'up_blocks.2', 'up_blocks.3']    
-        mapping_layers_stu = ['down_blocks.0', 'down_blocks.1', 'down_blocks.2.attentions.0.proj_out',
-                                'up_blocks.0', 'up_blocks.1', 'up_blocks.2']  
-
-    if torch.cuda.device_count() > 1:
-        print(f"use multi-gpu: # gpus {torch.cuda.device_count()}")
-        # revise the hooked feature names for student (to consider ddp wrapper)
-        for i, m_stu in enumerate(mapping_layers_stu):
-            mapping_layers_stu[i] = 'module.'+m_stu
-
-    add_hook(unet_teacher, acts_tea, mapping_layers_tea)
-    add_hook(unet, acts_stu, mapping_layers_stu)
+        # mapping_layers_tea = ['down_blocks.0', 'down_blocks.1', 'down_blocks.2.attentions.1.proj_out',
+        #                         'up_blocks.1', 'up_blocks.2', 'up_blocks.3']    
+        # mapping_layers_stu = ['down_blocks.0', 'down_blocks.1', 'down_blocks.2.attentions.0.proj_out',
+        #                         'up_blocks.0', 'up_blocks.1', 'up_blocks.2']  
+        mapping_layers_tea = [
+        'up_blocks.1.attentions.2.proj_out',    # upsampler 직전의 두 번째 업 블록
+        'up_blocks.2.attentions.2.proj_out',    # upsampler 직전의 세 번째 업 블록
+        'up_blocks.3.attentions.2.proj_out',     # upsampler 직전의 네 번째 업 블록
+        'down_blocks.0.attentions.1.proj_out',  # downsampler 직전의 첫 번째 다운 블록
+        'down_blocks.1.attentions.1.proj_out',  # downsampler 직전의 두 번째 다운 블록
+        'down_blocks.2.attentions.1.proj_out',
+    ]
+        mapping_layers_stu = [        
+        'up_blocks.0.attentions.1.proj_out',    # upsampler 직전의 두 번째 업 블록
+        'up_blocks.1.attentions.1.proj_out',    # upsampler 직전의 세 번째 업 블록
+        'up_blocks.2.attentions.1.proj_out',     # upsampler 직전의 네 번째 업 블록
+        'down_blocks.0.attentions.0.proj_out',  # downsampler 직전의 첫 번째 다운 블록
+        'down_blocks.1.attentions.0.proj_out',  # downsampler 직전의 두 번째 다운 블록
+        'down_blocks.2.attentions.0.proj_out',  # downsampler 직전의 세 번째 다운 블록
+    ]    
 
 
     if args.channel_mapping:
         teacher_channels_list = get_layer_output_channels(unet_teacher, mapping_layers_tea)
         student_channels_list = get_layer_output_channels(unet, mapping_layers_stu)
         conv_layers = MultiConv1x1(student_channels_list, teacher_channels_list)
-        
+        parameters = list(unet.parameters()) + list(conv_layers.parameters())
+    else:
+        parameters = unet.parameters()
+
+    # print(f"Number of parameters in text_encoder: {count_parameters(text_encoder):,}")
+    # print(f"Number of parameters in vae: {count_parameters(vae):,}")
+    # print(f"Number of parameters in unet_teacher: {count_parameters(unet_teacher):,}")
+    # print(f"Number of parameters in unet (student): {count_parameters(unet):,}")
+    
+    # with accelerator.main_process_first():
+    #     for name, module in unet.named_modules():
+    #         print(name)
+    
     optimizer = optimizer_cls(
-        unet.parameters(),
+        parameters,
         lr=args.learning_rate,
         betas=(args.adam_beta1, args.adam_beta2),
         weight_decay=args.adam_weight_decay,
@@ -702,11 +777,25 @@ def main():
         num_training_steps=args.max_train_steps * args.gradient_accumulation_steps,
     )
 
-    # Prepare everything with our `accelerator`.
-    unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
-        unet, optimizer, train_dataloader, lr_scheduler
-    )
+    if args.channel_mapping:
+        # Prepare everything with our `accelerator`.
+        unet, conv_layers, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+            unet, conv_layers, optimizer, train_dataloader, lr_scheduler
+        )
+    else:
+        unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
+            unet, optimizer, train_dataloader, lr_scheduler
+        )
+    
+    if torch.cuda.device_count() > 1:
+        print(f"use multi-gpu: # gpus {torch.cuda.device_count()}")
+        # revise the hooked feature names for student (to consider ddp wrapper)
+        for i, m_stu in enumerate(mapping_layers_stu):
+            mapping_layers_stu[i] = 'module.'+m_stu
 
+    add_hook(unet_teacher, acts_tea, mapping_layers_tea)
+    add_hook(unet, acts_stu, mapping_layers_stu)
+    
     if args.use_ema:
         ema_unet.to(accelerator.device)
 
@@ -844,17 +933,22 @@ def main():
                 losses_kd_feat = []
                 #print("##########################################################################################")
                 for i, (m_tea, m_stu) in enumerate(zip(mapping_layers_tea, mapping_layers_stu)):
-                    
+
                     a_tea = acts_tea[m_tea]
                     a_stu = acts_stu[m_stu]
-
+                    
                     if type(a_tea) is tuple: a_tea = a_tea[0]                        
                     if type(a_stu) is tuple: a_stu = a_stu[0]
                     
                     if args.channel_mapping:
-                        a_stu = conv_layers.convs[i](a_stu)
-                     
-                    tmp = F.mse_loss(a_stu.float(), a_tea.detach().float(), reduction="mean")
+                        a_stu_ = conv_layers.module.convs[i](a_stu.to(conv_layers.module.convs[i].weight.dtype))
+                        # a_stu_ = a_stu_.to(a_tea.dtype)
+                        tmp = F.mse_loss(a_stu_.float(), a_tea.detach().float(), reduction="mean")
+                    else:
+                        # print(f"Layer teacher: {m_tea}, student: {m_stu}")
+                        # print(f"a_tea shape: {a_tea.shape}, a_stu shape: {a_stu.shape}")
+                        # print(f"After channel mapping, a_stu_ shape: {a_stu.shape}, a_tea shape: {a_tea.shape}")
+                        tmp = F.mse_loss(a_stu.float(), a_tea.detach().float(), reduction="mean")
                     losses_kd_feat.append(tmp)
                 
                     #print(a_tea.shape)
@@ -930,10 +1024,20 @@ def main():
                     
                     ################################################# Evaluate IS, FID, CLIP SCORE #################################################
                     sample_images_30k(args, accelerator, save_path)
+                    print(f"rank {local_rank} is done")
                     accelerator.wait_for_everyone()
                     if accelerator.is_main_process:
                         try:
-                            subprocess.run(["sh", "/home/work/StableDiffusion/T2I_distill2_GPU4/scripts/eval_scores_ddp.sh"], check=True, stdout=sys.stdout, stderr=sys.stderr )
+                            subprocess.run(
+                                [
+                                    "sh", "/home/work/StableDiffusion/T2I_copy_weight/scripts/eval_scores_ddp.sh",
+                                    args.save_dir,          # SAVE_DIR
+                                    str(args.img_sz),       # IMG_SZ
+                                    str(args.img_resz),     # IMG_RESZ
+                                    args.data_list          # DATA_LIST
+                                ],
+                                check=True, stdout=sys.stdout, stderr=sys.stderr
+                            )
                         except subprocess.CalledProcessError as e:
                             print(f"Error occurred while running script: {e}")
 

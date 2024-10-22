@@ -4,13 +4,13 @@
 # ------------------------------------------------------------------------------------
 MODEL_NAME="/home/work/StableDiffusion/stable-diffusion-v1-4"
 #TRAIN_DATA_DIR="./data/laion_aes/pt_cache_212k" # please adjust it if needed
-TRAIN_DATA_DIR="/home/work/StableDiffusion/T2I_distillation/data/laion_aes/pt_cache_212k" # 절대 경로로 설정]
+TRAIN_DATA_DIR="/home/work/StableDiffusion/T2I_distillation/data/laion_aes/latent_212k" # 절대 경로로 설정]
 EXTRA_TEXT_DIR="/home/work/StableDiffusion/T2I_distillation/data/laion400m-meta"
 
 UNET_CONFIG_PATH="./src/unet_config"
 UNET_NAME="bk_base" # option: ["bk_base", "bk_small", "bk_tiny"]
 
-OUTPUT_DIR="./results/toy_ddp_"$UNET_NAME # please adjust it if needed
+OUTPUT_DIR="./results/400M_random_cond_"$UNET_NAME # please adjust it if needed
 MODEL_ID="nota-ai/bk-sdm-${UNET_NAME#bk_}"
 
 BATCH_SIZE=64
