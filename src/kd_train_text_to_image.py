@@ -980,7 +980,7 @@ def main():
                         try:
                             subprocess.run(
                                 [
-                                    "sh", "/home/work/StableDiffusion/T2I_copy_weight/scripts/eval_scores_ddp.sh",
+                                    "sh", "./scripts/eval_scores_ddp.sh",
                                     args.save_dir,          # SAVE_DIR
                                     str(args.img_sz),       # IMG_SZ
                                     str(args.img_resz),     # IMG_RESZ

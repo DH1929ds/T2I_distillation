@@ -5,7 +5,7 @@ RANK=${RANK:-0}
 SAVE_DIR=${1:-./results/generated_images}
 IMG_SZ=${2:-512}
 IMG_RESZ=${3:-256}
-DATA_LIST=${4:-../T2I_distillation/data/mscoco_val2014_30k/metadata.csv}
+DATA_LIST=${4:-./data/mscoco_val2014_30k/metadata.csv}
 
 echo "SAVE_DIR: $SAVE_DIR"
 echo "IMG_SZ: $IMG_SZ"
