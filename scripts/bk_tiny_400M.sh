@@ -2,15 +2,15 @@
 # Copyright 2023. Nota Inc. All Rights Reserved.
 # Code modified from https://github.com/huggingface/diffusers/tree/v0.15.0/examples/text_to_image
 # ------------------------------------------------------------------------------------
-MODEL_NAME="CompVis/stable-diffusion-v1-4" #"/home/work/StableDiffusion/stable-diffusion-v1-4"
+MODEL_NAME="/home/work/StableDiffusion/stable-diffusion-v1-4"  #"CompVis/stable-diffusion-v1-4"
 #TRAIN_DATA_DIR="./data/laion_aes/pt_cache_212k" # please adjust it if needed
-TRAIN_DATA_DIR="./data/laion_aes/latent_212k" # 절대 경로로 설정]
-EXTRA_TEXT_DIR="./data/laion400m-meta"
+TRAIN_DATA_DIR="/home/work/StableDiffusion/T2I_distillation/data/laion_aes/latent_212k" # 절대 경로로 설정]
+EXTRA_TEXT_DIR="/home/work/StableDiffusion/T2I_distillation/data/laion400m-meta"
 
 UNET_CONFIG_PATH="./src/unet_config"
 UNET_NAME="bk_tiny" # option: ["bk_base", "bk_small", "bk_tiny"]
 
-OUTPUT_DIR="./results/rand_cond_"$UNET_NAME # please adjust it if needed
+OUTPUT_DIR="./results/bksdm_feature/rand_cond_copy_"$UNET_NAME # please adjust it if needed
 MODEL_ID="nota-ai/bk-sdm-${UNET_NAME#bk_}"
 
 BATCH_SIZE=64
@@ -43,6 +43,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch --multi_gpu --num_processes ${NUM
   --drop_text \
   --random_conditioning \
   --random_conditioning_lambda 5 \
-  --resume_from_checkpoint "latest"
+  --use_copy_weight_from_teacher
+  # --resume_from_checkpoint "latest"
 EndTime=$(date +%s)
 echo "** KD training takes $(($EndTime - $StartTime)) seconds."

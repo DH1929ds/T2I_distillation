@@ -647,9 +647,9 @@ def main():
     
     if args.unet_config_name in ['original']:
         
-        mapping_layers = ['up_blocks.0', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3',
-                          'mid_block',                          
-                        'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'down_blocks.3']    
+        mapping_layers = ['up_blocks.0.upsamplers.0.conv', 'up_blocks.1.upsamplers.0.conv', 'up_blocks.2.upsamplers.0.conv', 'up_blocks.3.attentions.2.proj_out',
+                          'mid_block.attentions.0.proj_out',                          
+                        'down_blocks.0.downsamplers.0.conv', 'down_blocks.1.downsamplers.0.conv', 'down_blocks.2.downsamplers.0.conv', 'down_blocks.3.resnets.1.conv2']    
         mapping_layers_tea = copy.deepcopy(mapping_layers)
         mapping_layers_stu = copy.deepcopy(mapping_layers)
         
