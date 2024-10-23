@@ -16,10 +16,8 @@ def parse_args():
                         help="Path to pretrained model or model identifier from huggingface.co/models.")
     parser.add_argument("--revision", type=str, default=None, required=False,
                         help="Revision of pretrained model identifier from huggingface.co/models.")
-    parser.add_argument("--train_data_dir", type=str,
-                        help="A folder containing the training data.")
     parser.add_argument("--max_train_samples", type=int, default=None, help="Truncate the number of training examples.")
-    parser.add_argument("--output_dir", type=str, default="data/laion_aes/GT_latent_212k",
+    parser.add_argument("--output_dir", type=str, default="/workspace/BK-SDM/data/laion_aes/GT_latent_212k",
                         help="The output directory where the model predictions and checkpoints will be written.")
     parser.add_argument("--seed", type=int, default=1234, help="A seed for reproducible training.")
     parser.add_argument("--resolution", type=int, default=512, help="The resolution for input images.")
@@ -86,8 +84,8 @@ def main():
             return text, image, base_name
 
     # DataLoader 설정
-    text_dir = "data/laion_aes/preprocessed_212k/train"
-    img_dir = "data/laion_aes/preprocessed_212k/train"
+    text_dir = "/workspace/BK-SDM/data/laion_aes/preprocessed_212k/train"
+    img_dir = "/workspace/BK-SDM/data/laion_aes/preprocessed_212k/train"
     
     
     print('before dataset')
