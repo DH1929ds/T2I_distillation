@@ -203,7 +203,7 @@ def parse_args():
     parser.add_argument(
         "--max_train_samples",
         type=int,
-        default=212766,
+        default=None,
         help=(
             "For debugging purposes or quicker training, truncate the number of training examples to this "
             "value if set."
@@ -422,6 +422,8 @@ def parse_args():
     parser.add_argument('--clip_seed', type=int, default=1234, help='Random seed for reproducibility')
     parser.add_argument('--clip_batch_size', type=int, default=50, help='Batch size for processing images')
 
+    parser.add_argument("--use_sd_loss", action="store_true", help="Whether to calculate sd_loss (denoising task loss).")
+        
     args = parser.parse_args()
     
     args.save_dir = os.path.join(args.output_dir, "generated_images")
@@ -645,78 +647,23 @@ def main():
     
     if args.unet_config_name in ['original']:
         
-        mapping_layers = [
-        'up_blocks.0.resnets.2',    # upsampler 직전의 첫 번째 업 블록
-        'up_blocks.1.attentions.2.proj_out',    # upsampler 직전의 두 번째 업 블록
-        'up_blocks.2.attentions.2.proj_out',    # upsampler 직전의 세 번째 업 블록
-        'up_blocks.3.attentions.2.proj_out',     # upsampler 직전의 네 번째 업 블록
-        'down_blocks.0.attentions.1.proj_out',  # downsampler 직전의 첫 번째 다운 블록
-        'down_blocks.1.attentions.1.proj_out',  # downsampler 직전의 두 번째 다운 블록
-        'down_blocks.2.attentions.1.proj_out',  # downsampler 직전의 세 번째 다운 블록
-        'down_blocks.3.resnets.1',  # downsampler 직전의 네 번째 다운 블록
-    ]
+        mapping_layers = ['up_blocks.0', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3',
+                          'mid_block',                          
+                        'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'down_blocks.3']    
         mapping_layers_tea = copy.deepcopy(mapping_layers)
         mapping_layers_stu = copy.deepcopy(mapping_layers)
         
     elif args.unet_config_name in ["bk_base", "bk_small"]:
-        # mapping_layers = ['up_blocks.0', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3',
-        #                 'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'down_blocks.3']
-        
-        # mapping_layers_tea = copy.deepcopy(mapping_layers)
-        # mapping_layers_stu = copy.deepcopy(mapping_layers)
-
-    #     mapping_layers = [
-    #     'up_blocks.0.resnets.1',    # upsampler 직전의 첫 번째 업 블록
-    #     'up_blocks.1.resnets.1',    # upsampler 직전의 두 번째 업 블록
-    #     'up_blocks.2.resnets.1',    # upsampler 직전의 세 번째 업 블록
-    #     'up_blocks.3.resnets.1',     # upsampler 직전의 네 번째 업 블록
-    #     'down_blocks.0.resnets.0',  # downsampler 직전의 첫 번째 다운 블록
-    #     'down_blocks.1.resnets.0',  # downsampler 직전의 두 번째 다운 블록
-    #     'down_blocks.2.resnets.0',  # downsampler 직전의 세 번째 다운 블록
-    #     'down_blocks.3.resnets.0',  # downsampler 직전의 네 번째 다운 블록
-    # ]    
-        mapping_layers_tea = [
-        'up_blocks.0.resnets.2',    # upsampler 직전의 첫 번째 업 블록
-        'up_blocks.1.attentions.2.proj_out',    # upsampler 직전의 두 번째 업 블록
-        'up_blocks.2.attentions.2.proj_out',    # upsampler 직전의 세 번째 업 블록
-        'up_blocks.3.attentions.2.proj_out',     # upsampler 직전의 네 번째 업 블록
-        'down_blocks.0.attentions.1.proj_out',  # downsampler 직전의 첫 번째 다운 블록
-        'down_blocks.1.attentions.1.proj_out',  # downsampler 직전의 두 번째 다운 블록
-        'down_blocks.2.attentions.1.proj_out',  # downsampler 직전의 세 번째 다운 블록
-        'down_blocks.3.resnets.1',  # downsampler 직전의 네 번째 다운 블록
-    ]
-        mapping_layers_stu = [
-        'up_blocks.0.resnets.1',    # upsampler 직전의 첫 번째 업 블록
-        'up_blocks.1.attentions.1.proj_out',    # upsampler 직전의 두 번째 업 블록
-        'up_blocks.2.attentions.1.proj_out',    # upsampler 직전의 세 번째 업 블록
-        'up_blocks.3.attentions.1.proj_out',     # upsampler 직전의 네 번째 업 블록
-        'down_blocks.0.attentions.0.proj_out',  # downsampler 직전의 첫 번째 다운 블록
-        'down_blocks.1.attentions.0.proj_out',  # downsampler 직전의 두 번째 다운 블록
-        'down_blocks.2.attentions.0.proj_out',  # downsampler 직전의 세 번째 다운 블록
-        'down_blocks.3.resnets.0',  # downsampler 직전의 네 번째 다운 블록
-    ]    
+        mapping_layers = ['up_blocks.0', 'up_blocks.1', 'up_blocks.2', 'up_blocks.3',
+                        'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'down_blocks.3']    
+        mapping_layers_tea = copy.deepcopy(mapping_layers)
+        mapping_layers_stu = copy.deepcopy(mapping_layers)
 
     elif args.unet_config_name in ["bk_tiny"]:
-        # mapping_layers_tea = ['down_blocks.0', 'down_blocks.1', 'down_blocks.2.attentions.1.proj_out',
-        #                         'up_blocks.1', 'up_blocks.2', 'up_blocks.3']    
-        # mapping_layers_stu = ['down_blocks.0', 'down_blocks.1', 'down_blocks.2.attentions.0.proj_out',
-        #                         'up_blocks.0', 'up_blocks.1', 'up_blocks.2']  
-        mapping_layers_tea = [
-        'up_blocks.1.attentions.2.proj_out',    # upsampler 직전의 두 번째 업 블록
-        'up_blocks.2.attentions.2.proj_out',    # upsampler 직전의 세 번째 업 블록
-        'up_blocks.3.attentions.2.proj_out',     # upsampler 직전의 네 번째 업 블록
-        'down_blocks.0.attentions.1.proj_out',  # downsampler 직전의 첫 번째 다운 블록
-        'down_blocks.1.attentions.1.proj_out',  # downsampler 직전의 두 번째 다운 블록
-        'down_blocks.2.attentions.1.proj_out',
-    ]
-        mapping_layers_stu = [        
-        'up_blocks.0.attentions.1.proj_out',    # upsampler 직전의 두 번째 업 블록
-        'up_blocks.1.attentions.1.proj_out',    # upsampler 직전의 세 번째 업 블록
-        'up_blocks.2.attentions.1.proj_out',     # upsampler 직전의 네 번째 업 블록
-        'down_blocks.0.attentions.0.proj_out',  # downsampler 직전의 첫 번째 다운 블록
-        'down_blocks.1.attentions.0.proj_out',  # downsampler 직전의 두 번째 다운 블록
-        'down_blocks.2.attentions.0.proj_out',  # downsampler 직전의 세 번째 다운 블록
-    ]    
+        mapping_layers_tea = ['down_blocks.0', 'down_blocks.1', 'down_blocks.2.attentions.1.proj_out',
+                                'up_blocks.1', 'up_blocks.2', 'up_blocks.3']    
+        mapping_layers_stu = ['down_blocks.0', 'down_blocks.1', 'down_blocks.2.attentions.0.proj_out',
+                                'up_blocks.0', 'up_blocks.1', 'up_blocks.2']  
 
 
     if args.channel_mapping:
@@ -923,7 +870,10 @@ def main():
 
                 # Predict the noise residual and compute loss
                 model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
-                #loss_sd = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+                if args.use_sd_loss:
+                    loss_sd = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+                else:
+                    loss_sd = torch.tensor(0.0, device=accelerator.device)  # If not using, set to zero
 
                 # Predict output-KD loss
                 model_pred_teacher = unet_teacher(noisy_latents, timesteps, encoder_hidden_states).sample
@@ -957,8 +907,8 @@ def main():
                 loss_kd_feat = sum(losses_kd_feat)
 
                 # Compute the final loss
-                # loss = args.lambda_sd * loss_sd + args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat
-                loss = args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat
+                loss = args.lambda_sd * loss_sd + args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat
+                # loss = args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat
 
                 ################################################## loss calculation ####################################################################
 
@@ -966,8 +916,8 @@ def main():
                 avg_loss = accelerator.gather(loss.repeat(args.train_batch_size)).mean()
                 train_loss += avg_loss.item() / args.gradient_accumulation_steps
 
-                # avg_loss_sd = accelerator.gather(loss_sd.repeat(args.train_batch_size)).mean()
-                # train_loss_sd += avg_loss_sd.item() / args.gradient_accumulation_steps
+                avg_loss_sd = accelerator.gather(loss_sd.repeat(args.train_batch_size)).mean()
+                train_loss_sd += avg_loss_sd.item() / args.gradient_accumulation_steps
 
                 avg_loss_kd_output = accelerator.gather(loss_kd_output.repeat(args.train_batch_size)).mean()
                 train_loss_kd_output += avg_loss_kd_output.item() / args.gradient_accumulation_steps
@@ -992,7 +942,7 @@ def main():
                 accelerator.log(
                     {
                         "train_loss": train_loss, 
-                        #"train_loss_sd": train_loss_sd,
+                        "train_loss_sd": train_loss_sd,
                         "train_loss_kd_output": train_loss_kd_output,
                         "train_loss_kd_feat": train_loss_kd_feat,
                         "lr": lr_scheduler.get_last_lr()[0]
@@ -1101,7 +1051,7 @@ def main():
                     torch.cuda.empty_cache()
 
             logs = {"step_loss": loss.detach().item(),
-                    #"sd_loss": loss_sd.detach().item(),
+                    "sd_loss": loss_sd.detach().item(),
                     "kd_output_loss": loss_kd_output.detach().item(),
                     "kd_feat_loss": loss_kd_feat.detach().item(),
                     "lr": lr_scheduler.get_last_lr()[0]}

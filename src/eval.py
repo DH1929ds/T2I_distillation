@@ -10,7 +10,8 @@ import subprocess
 import sys
 import shutil
 
-from accelerate import Accelerator
+from accelerate import Accelerator, InitProcessGroupKwargs
+from datetime import timedelta
 from eval_clip_score_ddp import evaluate_clip_score
 from generate_ddp2 import sample_images_30k
 import warnings
@@ -44,8 +45,11 @@ def main():
         print(f"Evaluation scores already exist at {scores_file_path}. Exiting script.")
         return  # Exit the script if the file exists
     
+    ipg_handler = InitProcessGroupKwargs(
+            timeout=timedelta(seconds=5400)
+            )
     
-    accelerator = Accelerator()
+    accelerator = Accelerator(kwargs_handlers=[ipg_handler])
                   
     ################################################# Evaluate IS, FID, CLIP SCORE #################################################
     sample_images_30k(args, accelerator, args.unet_path) 

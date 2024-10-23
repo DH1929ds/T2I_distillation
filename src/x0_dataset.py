@@ -76,8 +76,8 @@ class x0_dataset(Dataset):
         
 
     def __len__(self):
-        # 유효한 인덱스 개수를 반환합니다.
-        return len(self.data_indices)
+        # 유효한 인덱스 개수를 반환합니다.+
+        return len(self.metadata)
 
     def __getitem__(self, idx):
         # 인덱스에 해당하는 데이터 파일들을 로드하여 반환합니다.

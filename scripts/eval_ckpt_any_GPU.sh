@@ -17,6 +17,10 @@ unet_paths="/home/work/StableDiffusion/T2I_copy_weight/results/copy_weight_bk_ba
 /home/work/StableDiffusion/T2I_400M/results/toy_ddp_bk_base/checkpoint-200000,\
 /home/work/StableDiffusion/T2I_copy_weight/results/GT_copy_bk_base/checkpoint-25000,\
 /home/work/StableDiffusion/T2I_copy_weight/results/copy_weight_bk_base/checkpoint-25000,\
+/home/work/StableDiffusion/T2I_copy_weight/results/GT_copy_bk_base/checkpoint-50000,\
+/home/work/StableDiffusion/T2I_copy_weight/results/copy_weight_bk_base/checkpoint-50000,\
+/home/work/StableDiffusion/T2I_copy_weight/results/channel_smalloriginal/checkpoint-50000,\
+/home/work/StableDiffusion/T2I_copy_weight/results/rand_cond_bk_tiny/checkpoint-50000,\
 /home/work/StableDiffusion/T2I_400M/results/toy_ddp_bk_base/checkpoint-225000"
 
 # 쉼표로 구분된 문자열을 배열로 변환
