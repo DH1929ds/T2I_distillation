@@ -86,6 +86,8 @@ def sample_images_30k(args, accelerator, save_path=None):
         change_img_size(save_dir_src, save_dir_tgt, args.img_resz)
         progress_bar.close()
         accelerator.print(f"Image generation completed and resized images saved.")
+    else: 
+        time.sleep(600)
         
     accelerator.wait_for_everyone()
     
