@@ -49,8 +49,9 @@ from packaging import version
 from torchvision import transforms
 from tqdm.auto import tqdm
 from transformers import CLIPTextModel, CLIPTokenizer
-from eval_clip_score_ddp import evaluate_clip_score
-from generate_ddp2 import sample_images_30k
+from eval_clip_score_ddp import evaluate_clip_score, evaluate_clip_score_unseen_setting
+from generate_ddp2 import sample_images_30k, sample_images_41k
+from eval_score_wandb_log import log_eval_scores, log_eval_scores_unseen_setting
 
 import diffusers
 from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel
@@ -224,6 +225,9 @@ def parse_args():
     
     parser.add_argument("--random_conditioning", action='store_true', help='perform condition sharing')
     parser.add_argument("--random_conditioning_lambda", type=float, default=5, help="condition share lambda")
+
+    parser.add_argument("--use_unseen_setting", action='store_true', help='use unseen setting(train_data, eval_data)')
+
     
     parser.add_argument("--seed", type=int, default=None, help="A seed for reproducible training.")
     parser.add_argument(
@@ -417,7 +421,10 @@ def parse_args():
     parser.add_argument("--batch_sz", type=int, default=25)    
 
 
-    parser.add_argument("--data_list", type=str, default="../T2I_distillation/data/mscoco_val2014_30k/metadata.csv")
+    parser.add_argument("--data_list", type=str, default="./data/mscoco_val2014_30k/metadata.csv")
+    parser.add_argument("--valid41k_dir", type=str, default="./data/mscoco_val2014_41k")
+    
+
     parser.add_argument('--clip_device', type=str, default='cuda', help='Device to use, cuda or cpu')
     parser.add_argument('--clip_seed', type=int, default=1234, help='Random seed for reproducibility')
     parser.add_argument('--clip_batch_size', type=int, default=50, help='Batch size for processing images')
@@ -693,8 +700,8 @@ def main():
 
     train_dataset = x0_dataset(data_dir=args.train_data_dir, extra_text_dir=args.extra_text_dir,n_T=noise_scheduler.num_train_timesteps, 
                                random_conditioning=args.random_conditioning, random_conditioning_lambda=args.random_conditioning_lambda, 
-                               world_size=world_size, rank=local_rank)
-
+                               world_size=world_size, rank=local_rank, drop_text=args.drop_text, drop_text_p=args.drop_text_p, 
+                               use_unseen_setting=args.use_unseen_setting)
 
     with accelerator.main_process_first():
             if args.max_train_samples is not None:
@@ -971,84 +978,58 @@ def main():
                         logger.info(f"Saved state to {save_path}")
                         os.makedirs(args.save_dir, exist_ok=True)
                     accelerator.wait_for_everyone()
-                    
-                    ################################################# Evaluate IS, FID, CLIP SCORE #################################################
-                    sample_images_30k(args, accelerator, save_path)
-                    print(f"rank {local_rank} is done")
-                    accelerator.wait_for_everyone()
-                    if accelerator.is_main_process:
-                        try:
-                            subprocess.run(
-                                [
-                                    "sh", "./scripts/eval_scores_ddp.sh",
-                                    args.save_dir,          # SAVE_DIR
-                                    str(args.img_sz),       # IMG_SZ
-                                    str(args.img_resz),     # IMG_RESZ
-                                    args.data_list          # DATA_LIST
-                                ],
-                                check=True, stdout=sys.stdout, stderr=sys.stderr
-                            )
-                        except subprocess.CalledProcessError as e:
-                            print(f"Error occurred while running script: {e}")
+                                
+                    ################################################ Evaluate IS, FID, CLIP SCORE - Unseen Setting #################################################
+                    if args.use_unseen_setting:
+                        sample_images_41k(args, accelerator, save_path) 
+                        print(f"rank {local_rank} is done")
+                        accelerator.wait_for_everyone()
+                        if accelerator.is_main_process:
+                            try:
+                                subprocess.run(
+                                    [
+                                        "sh", "./scripts/eval_scores_ddp_unseen_setting.sh",
+                                        args.save_dir,          # SAVE_DIR
+                                        str(args.img_sz),       # IMG_SZ
+                                        str(args.img_resz),     # IMG_RESZ
+                                        args.valid41k_dir        # valid_dir
+                                    ],
+                                    check=True, stdout=sys.stdout, stderr=sys.stderr
+                                )
+                            except subprocess.CalledProcessError as e:
+                                print(f"Error occurred while running script: {e}")
 
-                    # Wait for all ranks to complete the evaluation
-                    accelerator.wait_for_everyone()
-                    evaluate_clip_score(args, accelerator)
-                    accelerator.wait_for_everyone()
-                    ################################################# Evaluate IS, FID, CLIP SCORE #################################################
+                        # Wait for all ranks to complete the evaluation
+                        accelerator.wait_for_everyone()
+                        evaluate_clip_score_unseen_setting(args, accelerator)
+                        log_eval_scores_unseen_setting(accelerator, args, global_step)
+                    ################################################################################################################################################                    
+     
+                    ################################################ Evaluate IS, FID, CLIP SCORE - Base Setting ###################################################
+                    else:
+                        sample_images_30k(args, accelerator, save_path)
+                        print(f"rank {local_rank} is done")
+                        accelerator.wait_for_everyone()
+                        if accelerator.is_main_process:
+                            try:
+                                subprocess.run(
+                                    [
+                                        "sh", "./scripts/eval_scores_ddp.sh",
+                                        args.save_dir,          # SAVE_DIR
+                                        str(args.img_sz),       # IMG_SZ
+                                        str(args.img_resz),     # IMG_RESZ
+                                        args.data_list          # DATA_LIST
+                                    ],
+                                    check=True, stdout=sys.stdout, stderr=sys.stderr
+                                )
+                            except subprocess.CalledProcessError as e:
+                                print(f"Error occurred while running script: {e}")
 
-                    # Read and log evaluation scores to WandB (main process only)
-                    if accelerator.is_main_process:
-                        is_txt_path = os.path.join(args.save_dir, "im256_is.txt")
-                        fid_txt_path = os.path.join(args.save_dir, "im256_fid.txt")
-                        clip_txt_path = os.path.join(args.save_dir, "im256_clip.txt")
-
-                        score_dict = {}
-
-                        # Read Inception Score (IS)
-                        try:
-                            with open(is_txt_path, "r") as f:
-                                lines = f.readlines()
-                                is_score = float(lines[-2].strip().split()[-1])
-                                score_dict["IS"] = is_score
-                        except FileNotFoundError:
-                            print(f"Warning: IS score file {is_txt_path} not found.")
-                            score_dict["IS"] = None
-
-                        # Read Fréchet Inception Distance (FID)
-                        try:
-                            with open(fid_txt_path, "r") as f:
-                                lines = f.readlines()
-                                fid_score = float(lines[0].strip().split()[-1])
-                                score_dict["FID"] = fid_score
-                        except FileNotFoundError:
-                            print(f"Warning: FID score file {fid_txt_path} not found.")
-                            score_dict["FID"] = None
-
-                        # Read CLIP Score
-                        try:
-                            with open(clip_txt_path, "r") as f:
-                                lines = f.readlines()
-                                clip_score = float(lines[0].strip().split()[-1])
-                                score_dict["CLIP"] = clip_score
-                        except FileNotFoundError:
-                            print(f"Warning: CLIP score file {clip_txt_path} not found.")
-                            score_dict["CLIP"] = None
-
-                        # Logging scores to WandB
-                        wandb.log(score_dict, step=global_step)
-
-                        # Print scores for verification
-                        print(f"Inception Score (IS): {score_dict['IS']}")
-                        print(f"Fréchet Inception Distance (FID): {score_dict['FID']}")
-                        print(f"CLIP Score: {score_dict['CLIP']}")
-
-                        try:
-                            shutil.rmtree(args.save_dir)
-                            print(f"All folders in {args.save_dir} have been deleted.")
-                        except Exception as e:
-                            print(f"Error occurred while deleting folders in {args.save_dir}: {e}")
-                    torch.cuda.empty_cache()
+                        # Wait for all ranks to complete the evaluation
+                        accelerator.wait_for_everyone()
+                        evaluate_clip_score(args, accelerator)
+                        log_eval_scores(accelerator, args, global_step)
+                    #################################################################################################################################################
 
             logs = {"step_loss": loss.detach().item(),
                     "sd_loss": loss_sd.detach().item(),

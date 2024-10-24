@@ -21,18 +21,23 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Simple example of a training script.")
     # arguments for evaluation
     parser.add_argument("--model_id", type=str, default="nota-ai/bk-sdm-base", help="Path to the pretrained model or checkpoint directory.")
-    parser.add_argument("--unet_path", type=str, default="/home/work/StableDiffusion/T2I_distill1_GPU4/results/toy_ddp_bk_base/checkpoint-25000", help="Model checkpoint for evaluate")
+    parser.add_argument("--unet_path", type=str, help="Model checkpoint for evaluate")
     parser.add_argument("--img_sz", type=int, default=512)
     parser.add_argument("--img_resz", type=int, default=256)
     parser.add_argument("--num_inference_steps", type=int, default=25)
     parser.add_argument("--batch_sz", type=int, default=64)    
 
     parser.add_argument("--save_txt", type=str, default="./results/generated_images/im256_clip.txt")
-    parser.add_argument("--data_list", type=str, default="../T2I_distillation/data/mscoco_val2014_30k/metadata.csv")
+    parser.add_argument("--data_list", type=str, default="./data/mscoco_val2014_30k/metadata.csv")
     parser.add_argument("--img_dir", type=str, default="./results/generated_images/im256")
     parser.add_argument("--save_dir", type=str, default="./results/generated_images")
     parser.add_argument('--clip_seed', type=int, default=1234, help='Random seed for reproducibility')
     parser.add_argument('--clip_batch_size', type=int, default=50, help='Batch size for processing images')
+    
+    
+    parser.add_argument("--use_unseen_setting", action='store_true', help='eval seen/unseen/all') # 수정 필요!
+    
+    
     args = parser.parse_args()
     return args
         
@@ -52,20 +57,51 @@ def main():
     accelerator = Accelerator(kwargs_handlers=[ipg_handler])
                   
     ################################################# Evaluate IS, FID, CLIP SCORE #################################################
-    sample_images_30k(args, accelerator, args.unet_path) 
-    accelerator.wait_for_everyone()
-    if accelerator.is_main_process:
-        try:
-            subprocess.run(["sh", "./scripts/eval_scores_ddp.sh"], check=True, stdout=sys.stdout, stderr=sys.stderr )
-        except subprocess.CalledProcessError as e:
-            print(f"Error occurred while running script: {e}")
+    if args.use_unseen_setting:
+        # sample_images_41k(args, accelerator, args.unet_path) 
+        # accelerator.wait_for_everyone()
+        # if accelerator.is_main_process:
+        #     try:
+        #         subprocess.run(
+        #             [
+        #                 "sh", "./scripts/eval_scores_ddp_unseen_setting.sh",
+        #                 args.save_dir,          # SAVE_DIR
+        #                 str(args.img_sz),       # IMG_SZ
+        #                 str(args.img_resz),     # IMG_RESZ
+        #                 args.valid41k_dir        # valid_dir
+        #             ],
+        #             check=True, stdout=sys.stdout, stderr=sys.stderr
+        #         )
+        #     except subprocess.CalledProcessError as e:
+        #         print(f"Error occurred while running script: {e}")
 
-    # Wait for all ranks to complete the evaluation
-    accelerator.wait_for_everyone()
-    evaluate_clip_score(args, accelerator)
-    accelerator.wait_for_everyone()
-    ################################################# Evaluate IS, FID, CLIP SCORE #################################################
+        # # Wait for all ranks to complete the evaluation
+        # accelerator.wait_for_everyone()
+        # evaluate_clip_score(args, accelerator)
+        accelerator.wait_for_everyone()
+        ################################################# Evaluate IS, FID, CLIP SCORE #################################################
+    else:
+        sample_images_30k(args, accelerator, args.unet_path) 
+        accelerator.wait_for_everyone()
+        if accelerator.is_main_process:
+            try:
+                subprocess.run(
+                    [
+                        "sh", "./scripts/eval_scores_ddp.sh",
+                        args.save_dir,          # SAVE_DIR
+                        str(args.img_sz),       # IMG_SZ
+                        str(args.img_resz),     # IMG_RESZ
+                        args.data_list          # DATA_LIST
+                    ],
+                    check=True, stdout=sys.stdout, stderr=sys.stderr
+                )
+            except subprocess.CalledProcessError as e:
+                print(f"Error occurred while running script: {e}")
 
+        # Wait for all ranks to complete the evaluation
+        accelerator.wait_for_everyone()
+        evaluate_clip_score(args, accelerator)
+        accelerator.wait_for_everyone()    
     # Read and log evaluation scores to WandB (main process only)
     if accelerator.is_main_process:
         is_txt_path = os.path.join(args.save_dir, "im256_is.txt")

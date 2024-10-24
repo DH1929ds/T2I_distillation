@@ -4,7 +4,7 @@
 # ------------------------------------------------------------------------------------
 MODEL_NAME="/home/work/StableDiffusion/stable-diffusion-v1-4"  #"CompVis/stable-diffusion-v1-4"
 #TRAIN_DATA_DIR="./data/laion_aes/pt_cache_212k" # please adjust it if needed
-TRAIN_DATA_DIR="/home/work/StableDiffusion/T2I_distillation/data/laion_aes/latent_212k" # 절대 경로로 설정]
+TRAIN_DATA_DIR="/home/work/StableDiffusion/T2I_copy_weight/data/laion_aes/latent_212k" # 절대 경로로 설정]
 EXTRA_TEXT_DIR="/home/work/StableDiffusion/T2I_distillation/data/laion400m-meta"
 
 UNET_CONFIG_PATH="./src/unet_config"
@@ -43,7 +43,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch --multi_gpu --num_processes ${NUM
   --drop_text \
   --random_conditioning \
   --random_conditioning_lambda 5 \
-  --use_copy_weight_from_teacher
+  --use_copy_weight_from_teacher \
+  --use_unseen_setting \
+  --dataloader_num_workers 2
   # --resume_from_checkpoint "latest"
 EndTime=$(date +%s)
 echo "** KD training takes $(($EndTime - $StartTime)) seconds."

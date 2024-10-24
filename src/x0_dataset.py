@@ -9,7 +9,7 @@ import numpy as np
 class x0_dataset(Dataset):
     def __init__(self, data_dir, extra_text_dir=None, n_T=1000, random_conditioning = False, 
                  random_conditioning_lambda=5, world_size=1, rank=0
-                 ,drop_text=True, drop_text_p=0.1):
+                 ,drop_text=True, drop_text_p=0.1, use_unseen_setting=False):
         """
         Args:
             data_dir (str): 데이터가 저장된 폴더의 경로.
@@ -24,8 +24,12 @@ class x0_dataset(Dataset):
         self.drop_text = drop_text
         self.drop_text_p = drop_text_p
         
-        # 메타데이터 CSV 파일 로드
-        metadata_path = os.path.join(data_dir, "metadata.csv")
+        # Select metadata - Using unseen setting or not
+        
+        if use_unseen_setting:
+            metadata_path = os.path.join(data_dir, "metadata_seen.csv") #exclude animal related texts from laion 212k dataset(metadata.csv)
+        else:
+            metadata_path = os.path.join(data_dir, "metadata.csv") #laion 212k dataset
         self.metadata = pd.read_csv(metadata_path)
         
         self.text_data = self._load_extra_text_data(extra_text_dir)
