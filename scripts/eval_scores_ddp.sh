@@ -17,7 +17,7 @@ IMG_PATH="$SAVE_DIR/im$IMG_RESZ"
 IS_TXT="$SAVE_DIR/im${IMG_RESZ}_is.txt"
 FID_TXT="$SAVE_DIR/im${IMG_RESZ}_fid.txt"
 NPZ_NAME_gen="$SAVE_DIR/im${IMG_RESZ}_fid.npz"
-NPZ_NAME_real="../T2I_copy_weight/data/mscoco_val2014_30k/real_im${IMG_RESZ}.npz"
+NPZ_NAME_real="./data/mscoco_val2014_30k/real_im${IMG_RESZ}.npz"
 
 # === Inception Score (IS) ===
 if [ $RANK -eq 0 ]; then

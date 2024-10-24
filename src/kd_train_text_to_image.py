@@ -417,7 +417,7 @@ def parse_args():
     parser.add_argument("--unet_path", type=str, default="/home/work/StableDiffusion/T2I_distill1_GPU4/results/toy_ddp_bk_base/checkpoint-25000", help="Model checkpoint for evaluate")
     parser.add_argument("--img_sz", type=int, default=512)
     parser.add_argument("--img_resz", type=int, default=256)
-    parser.add_argument("--num_inference_steps", type=int, default=25)
+    parser.add_argument("--num_inference_steps", type=int, default=20)
     parser.add_argument("--batch_sz", type=int, default=25)    
 
 
