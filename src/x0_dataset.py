@@ -108,7 +108,11 @@ class x0_dataset(Dataset):
         
         if self.random_conditioning:
             t_value = timestep.item()
-            p = math.exp(-self.random_conditioning_lambda * (1 - t_value / self.n_T)) 
+            p = math.exp(-self.random_conditioning_lambda * (1 - t_value / self.n_T))
+            # if t_value>self.n_T/2:
+            #     p = math.exp(-self.random_conditioning_lambda * (1 - t_value / self.n_T))
+            # else:
+            #     p = math.exp(-self.random_conditioning_lambda * (t_value / self.n_T))
             # p = (2 * (t_value - self.n_T / 2) / self.n_T) ** 2
             # p=0.5
             if torch.rand(1).item() < p:
