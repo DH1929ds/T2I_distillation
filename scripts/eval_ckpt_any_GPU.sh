@@ -10,7 +10,7 @@ CUDA_VISIBLE_DEVICES=$(nvidia-smi --query-gpu=index --format=csv,noheader | past
 NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
 
 # 여러 개의 unet_path를 쉼표로 구분하여 전달 (예: "path1,path2,path3")
-unet_paths="/home/work/StableDiffusion/T2I_copy_weight/results/bksdm_feature/GTimg_rand_cond_copy_bk_base/checkpoint-25000"
+unet_paths="/home/work/StableDiffusion/T2I_copy_weight/results/bksdm_feature/GTimg_rand_cond_copy_bk_base/checkpoint-50000"
 # /home/work/StableDiffusion/T2I_copy_weight/results/copy_weight_bk_base/checkpoint-100000,\
 # /home/work/StableDiffusion/T2I_400M_uncond/results/toy_ddp_bk_base/checkpoint-175000,\
 # /home/work/StableDiffusion/T2I_400M_uncond/results/toy_ddp_bk_base/checkpoint-200000,\

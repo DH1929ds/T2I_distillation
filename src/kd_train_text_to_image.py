@@ -443,7 +443,7 @@ def parse_args():
     parser.add_argument("--img_sz", type=int, default=512)
     parser.add_argument("--img_resz", type=int, default=256)
     parser.add_argument("--num_inference_steps", type=int, default=25)
-    parser.add_argument("--batch_sz", type=int, default=20)    
+    parser.add_argument("--batch_sz", type=int, default=10)    
 
 
     parser.add_argument("--data_list", type=str, default="./data/mscoco_val2014_30k/metadata.csv")
