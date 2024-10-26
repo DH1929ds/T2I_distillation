@@ -30,6 +30,7 @@ class x0_dataset(Dataset):
             metadata_path = os.path.join(data_dir, "metadata_seen.csv") #exclude animal related texts from laion 212k dataset(metadata.csv)
         else:
             metadata_path = os.path.join(data_dir, "metadata.csv") #laion 212k dataset
+        print(f"Using data dir in {metadata_path}!!!!!")
         self.metadata = pd.read_csv(metadata_path)
         
         self.text_data = self._load_extra_text_data(extra_text_dir)
