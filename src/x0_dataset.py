@@ -27,15 +27,23 @@ class x0_dataset(Dataset):
         # Select metadata - Using unseen setting or not
         
         if use_unseen_setting:
-            metadata_path = os.path.join(data_dir, "metadata_seen.csv") #exclude animal related texts from laion 212k dataset(metadata.csv)
+            seen_metadata_path = os.path.join(data_dir, "metadata_seen.csv") #exclude animal related texts from laion 212k dataset(metadata.csv)
+            print(f"Using data dir in {seen_metadata_path}!!!!!")
+            self.metadata = pd.read_csv(seen_metadata_path)
+            
+            
+            all_metadata_path = os.path.join(data_dir, "metadata.csv") #laion 212k dataset
+            all_metadata = pd.read_csv(all_metadata_path)
+                    
+            self.text_data = self._load_extra_text_data(all_metadata, extra_text_dir)
         else:
             metadata_path = os.path.join(data_dir, "metadata.csv") #laion 212k dataset
-        print(f"Using data dir in {metadata_path}!!!!!")
-        self.metadata = pd.read_csv(metadata_path)
-        
-        self.text_data = self._load_extra_text_data(extra_text_dir)
+            print(f"Using data dir in {metadata_path}!!!!!")
+            self.metadata = pd.read_csv(metadata_path)
+            
+            self.text_data = self._load_extra_text_data(self.metadata, extra_text_dir)
 
-    def _load_extra_text_data(self, extra_text_dir):
+    def _load_extra_text_data(self, metameta, extra_text_dir):
         """
         추가 텍스트 데이터를 로드하고, 메타데이터의 텍스트와 결합하여 반환합니다.
 
@@ -46,7 +54,7 @@ class x0_dataset(Dataset):
             pandas.Series: 모든 텍스트 데이터가 포함된 시리즈.
         """
         # 메타데이터의 텍스트를 먼저 가져옵니다.
-        text_data_list = [self.metadata['text']]
+        text_data_list = [metameta['text']]
 
         if extra_text_dir is not None:
             # extra_text_dir 내의 모든 Parquet 파일 목록을 가져옵니다.
