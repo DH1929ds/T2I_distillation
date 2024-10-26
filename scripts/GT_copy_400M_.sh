@@ -44,7 +44,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch --multi_gpu --num_processes ${NUM
   --random_conditioning \
   --random_conditioning_lambda 5 \
   --use_copy_weight_from_teacher \
-  --dataloader_num_workers 2
-  # --resume_from_checkpoint "latest"
+  --dataloader_num_workers 2 \
+  --resume_from_checkpoint "latest"
 EndTime=$(date +%s)
 echo "** KD training takes $(($EndTime - $StartTime)) seconds."

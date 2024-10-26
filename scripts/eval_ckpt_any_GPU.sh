@@ -10,18 +10,18 @@ CUDA_VISIBLE_DEVICES=$(nvidia-smi --query-gpu=index --format=csv,noheader | past
 NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
 
 # 여러 개의 unet_path를 쉼표로 구분하여 전달 (예: "path1,path2,path3")
-unet_paths="/home/work/StableDiffusion/T2I_copy_weight/results/copy_weight_bk_base/checkpoint-75000,\
-/home/work/StableDiffusion/T2I_copy_weight/results/copy_weight_bk_base/checkpoint-100000,\
-/home/work/StableDiffusion/T2I_400M_uncond/results/toy_ddp_bk_base/checkpoint-175000,\
-/home/work/StableDiffusion/T2I_400M_uncond/results/toy_ddp_bk_base/checkpoint-200000,\
-/home/work/StableDiffusion/T2I_400M/results/toy_ddp_bk_base/checkpoint-200000,\
-/home/work/StableDiffusion/T2I_copy_weight/results/GT_copy_bk_base/checkpoint-25000,\
-/home/work/StableDiffusion/T2I_copy_weight/results/copy_weight_bk_base/checkpoint-25000,\
-/home/work/StableDiffusion/T2I_copy_weight/results/GT_copy_bk_base/checkpoint-50000,\
-/home/work/StableDiffusion/T2I_copy_weight/results/copy_weight_bk_base/checkpoint-50000,\
-/home/work/StableDiffusion/T2I_copy_weight/results/channel_smalloriginal/checkpoint-50000,\
-/home/work/StableDiffusion/T2I_copy_weight/results/rand_cond_bk_tiny/checkpoint-50000,\
-/home/work/StableDiffusion/T2I_400M/results/toy_ddp_bk_base/checkpoint-225000"
+unet_paths="/home/work/StableDiffusion/T2I_copy_weight/results/bksdm_feature/GTimg_rand_cond_copy_bk_base/checkpoint-25000"
+# /home/work/StableDiffusion/T2I_copy_weight/results/copy_weight_bk_base/checkpoint-100000,\
+# /home/work/StableDiffusion/T2I_400M_uncond/results/toy_ddp_bk_base/checkpoint-175000,\
+# /home/work/StableDiffusion/T2I_400M_uncond/results/toy_ddp_bk_base/checkpoint-200000,\
+# /home/work/StableDiffusion/T2I_400M/results/toy_ddp_bk_base/checkpoint-200000,\
+# /home/work/StableDiffusion/T2I_copy_weight/results/GT_copy_bk_base/checkpoint-25000,\
+# /home/work/StableDiffusion/T2I_copy_weight/results/copy_weight_bk_base/checkpoint-25000,\
+# /home/work/StableDiffusion/T2I_copy_weight/results/GT_copy_bk_base/checkpoint-50000,\
+# /home/work/StableDiffusion/T2I_copy_weight/results/copy_weight_bk_base/checkpoint-50000,\
+# /home/work/StableDiffusion/T2I_copy_weight/results/channel_smalloriginal/checkpoint-50000,\
+# /home/work/StableDiffusion/T2I_copy_weight/results/rand_cond_bk_tiny/checkpoint-50000,\
+# /home/work/StableDiffusion/T2I_400M/results/toy_ddp_bk_base/checkpoint-225000"
 
 # 쉼표로 구분된 문자열을 배열로 변환
 IFS=',' read -r -a unet_path_array <<< "$unet_paths"

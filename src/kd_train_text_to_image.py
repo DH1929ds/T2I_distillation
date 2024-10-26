@@ -52,6 +52,8 @@ from transformers import CLIPTextModel, CLIPTokenizer
 from eval_clip_score_ddp import evaluate_clip_score, evaluate_clip_score_unseen_setting
 from generate_ddp2 import sample_images_30k, sample_images_41k
 from eval_score_wandb_log import log_eval_scores, log_eval_scores_unseen_setting
+from torchvision.utils import save_image, make_grid
+
 
 import diffusers
 from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel
@@ -400,17 +402,40 @@ def parse_args():
     parser.add_argument("--lambda_sd", type=float, default=1.0, help="weighting for the denoising task loss")  
     parser.add_argument("--lambda_kd_output", type=float, default=1.0, help="weighting for output KD loss")  
     parser.add_argument("--lambda_kd_feat", type=float, default=1.0, help="weighting for feature KD loss")  
-    parser.add_argument("--valid_prompt", type=str, default="a golden vase with different flowers")
-    parser.add_argument("--valid_steps", type=int, default=1000)
+    parser.add_argument("--valid_steps", type=int, default=100)
     parser.add_argument("--num_valid_images", type=int, default=2)
     parser.add_argument("--use_copy_weight_from_teacher", action="store_true", help="Whether to initialize unet student with teacher's weights",)
+    parser.add_argument("--valid_prompt", type=str, default="a golden vase with different flowers")
+
+    parser.add_argument("--valid_prompts", type=str, nargs='+', default=[
+        "A cat crawling into a white toilet seat.",
+        "a small elephant walks in a lush forest",
+        "A couple of elephants walking across a river.",
+        "A white horse looking through the window of a tall brick building.",
+        "A dog with goggles is in a motorcycle side car.",
+        "A large elephant walking next to a fallen tree.",
+        "A striped cat curled up above a comforter.",
+        "A cat laying bed in a small room.",
+        "A horse with a blanket on it eating hay.",
+        "Dog in bag with mesh and items around",
+        "A young sexy woman holding a tennis racquet on a tennis court.",
+        "The torso of a man who is holding a knife.",
+        "a person that is standing up in a tennis court",
+        "A man swinging a tennis racquet on a tennis court.",
+        "a young man in a grey shirt is going to cut his hair",
+        "a red fire hydrant near a dirt road with trees in the background",
+        "a tennis player attempting to reach a tennis ball",
+        "A bathroom with a tiled floor and a sink.",
+        "Bride and grooms arms cutting the wedding cake with fruit on top.",
+        "A bathroom with a brown shower curtain and white toilet"
+    ])
     
     
     parser.add_argument("--channel_mapping", action="store_true", help="channel mapping",)
     
     
     parser.add_argument("--drop_text", action="store_true", help="distillation null text",)
-    parser.add_argument("--drop_text_p", type=float, default=5.0, help="null text ratio",)
+    parser.add_argument("--drop_text_p", type=float, default=0.1, help="null text ratio",)
     
     # arguments for evaluation
     parser.add_argument("--model_id", type=str, default="nota-ai/bk-sdm-base", help="Path to the pretrained model or checkpoint directory.")
@@ -418,7 +443,7 @@ def parse_args():
     parser.add_argument("--img_sz", type=int, default=512)
     parser.add_argument("--img_resz", type=int, default=256)
     parser.add_argument("--num_inference_steps", type=int, default=25)
-    parser.add_argument("--batch_sz", type=int, default=25)    
+    parser.add_argument("--batch_sz", type=int, default=20)    
 
 
     parser.add_argument("--data_list", type=str, default="./data/mscoco_val2014_30k/metadata.csv")
@@ -972,6 +997,7 @@ def main():
 
                 # torch.cuda.empty_cache()
                 if global_step % args.checkpointing_steps == 0:
+                    torch.cuda.empty_cache()
                     save_path = os.path.join(args.output_dir, f"checkpoint-{global_step}")
                     if accelerator.is_main_process:
                         accelerator.save_state(save_path)
@@ -981,7 +1007,7 @@ def main():
                                 
                     ################################################ Evaluate IS, FID, CLIP SCORE - Unseen Setting #################################################
                     if args.use_unseen_setting:
-                        sample_images_41k(args, accelerator, save_path) 
+                        sample_images_41k(args, accelerator, save_path)  # None으로 바뀌어 있으니까 test끝나고 바로 None 지워야함!! 
                         print(f"rank {local_rank} is done")
                         accelerator.wait_for_everyone()
                         if accelerator.is_main_process:
@@ -1064,11 +1090,34 @@ def main():
                 # mixed precision hooks while we are still training
                 pipeline.unet = accelerator.unwrap_model(unet, keep_fp32_wrapper=True).to(accelerator.device)
             
-                for kk in range(args.num_valid_images):
-                    image = pipeline(args.valid_prompt, num_inference_steps=25, generator=generator).images[0]
-                    tmp_name = os.path.join(val_img_dir, f"gstep{global_step}_epoch{epoch}_step{step}_{kk}.png")
-                    print(tmp_name)
-                    image.save(tmp_name)
+                # for kk in range(args.num_valid_images):
+                #     image = pipeline(args.valid_prompt, num_inference_steps=25, generator=generator).images[0]
+                #     tmp_name = os.path.join(val_img_dir, f"gstep{global_step}_epoch{epoch}_step{step}_{kk}.png")
+                #     print(tmp_name)
+                #     image.save(tmp_name)
+                # 이미지 생성 루프
+                # 리스트에 모든 이미지 저장
+                all_images = []
+                
+                # 각 프롬프트로 이미지를 생성하고 리스트에 추가
+                for kk, prompt in enumerate(args.valid_prompts):
+                    image = pipeline(prompt, num_inference_steps=25, generator=generator).images[0]
+                    all_images.append(transforms.ToTensor()(image))  # 이미지 배열을 텐서로 변환하여 리스트에 추가
+                
+                # 그리드로 결합 (nrow 파라미터로 한 줄에 몇 개의 이미지를 배치할지 결정 가능)
+                grid = make_grid(all_images, nrow=10, padding=2)
+                
+                # 그리드 이미지를 저장할 파일 경로 지정
+                grid_save_path = os.path.join(val_img_dir, f"gstep{global_step}_epoch{epoch}_step{step}_grid.png")
+                
+                # 그리드 이미지를 PIL 이미지로 변환하여 저장
+                grid_image = transforms.ToPILImage()(grid)
+                grid_image.save(grid_save_path)
+
+                wandb.log({"Generated Image Grid": wandb.Image(grid_image, caption=f"Grid for epoch {epoch}, step {step}")})
+
+                
+                print(f"Saved grid image at: {grid_save_path}")
 
                 del pipeline
                 torch.cuda.empty_cache()
