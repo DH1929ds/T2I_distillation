@@ -402,7 +402,7 @@ def parse_args():
     parser.add_argument("--lambda_sd", type=float, default=1.0, help="weighting for the denoising task loss")  
     parser.add_argument("--lambda_kd_output", type=float, default=1.0, help="weighting for output KD loss")  
     parser.add_argument("--lambda_kd_feat", type=float, default=1.0, help="weighting for feature KD loss")  
-    parser.add_argument("--valid_steps", type=int, default=100)
+    parser.add_argument("--valid_steps", type=int, default=10000)
     parser.add_argument("--num_valid_images", type=int, default=2)
     parser.add_argument("--use_copy_weight_from_teacher", action="store_true", help="Whether to initialize unet student with teacher's weights",)
     parser.add_argument("--valid_prompt", type=str, default="a golden vase with different flowers")
@@ -542,7 +542,7 @@ def main():
 
     # If passed along, set the training seed now.
     if args.seed is not None:
-        set_seed(args.seed)
+        set_seed(args.seed+accelerator.local_process_index)
 
     # Handle the repository creation
     if accelerator.is_main_process and (args.output_dir is not None):
@@ -730,8 +730,10 @@ def main():
 
     with accelerator.main_process_first():
             if args.max_train_samples is not None:
-                indices = list(range(args.max_train_samples))
+                print("all:", len(train_dataset))
+                indices = random.sample(range(len(train_dataset)), args.max_train_samples)
                 train_dataset = Subset(train_dataset, indices)
+                print("Subset:", len(train_dataset))
 
     # DataLoaders creation:
     train_dataloader = torch.utils.data.DataLoader(
@@ -903,7 +905,14 @@ def main():
                 # Predict the noise residual and compute loss
                 model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
                 if args.use_sd_loss:
-                    loss_sd = F.mse_loss(model_pred.float(), target.float(), reduction="mean")
+                    paireds = batch['paireds']
+                    mask = (paireds == 1)
+                    model_pred_ = model_pred[mask]
+                    target_ = target[mask]
+                    if model_pred_.numel() > 0:  # 필터링된 요소가 있는지 확인
+                        loss_sd = F.mse_loss(model_pred_.float(), target_.float(), reduction="mean")
+                    else:
+                        loss_sd = torch.tensor(0.0, device=accelerator.device)
                 else:
                     loss_sd = torch.tensor(0.0, device=accelerator.device)  # If not using, set to zero
 
@@ -1065,7 +1074,7 @@ def main():
             progress_bar.set_postfix(**logs)
             accelerator.wait_for_everyone()
             # save validation images
-            if (args.valid_prompt is not None) and (step % args.valid_steps == 0) and accelerator.is_main_process:
+            if (args.valid_prompt is not None) and (global_step % args.valid_steps == 0) and accelerator.is_main_process:
                 logger.info(
                     f"Running validation... \n Generating {args.num_valid_images} images with prompt:"
                     f" {args.valid_prompt}."

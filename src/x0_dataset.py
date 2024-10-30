@@ -105,7 +105,7 @@ class x0_dataset(Dataset):
         latent_tensor = torch.load(latent_path)
         
         timestep = torch.randint(0, self.n_T, (1,)).long()        
-        
+        paired = torch.tensor(1).unsqueeze(0)
         if self.random_conditioning:
             t_value = timestep.item()
             p = math.exp(-self.random_conditioning_lambda * (1 - t_value / self.n_T))
@@ -119,21 +119,23 @@ class x0_dataset(Dataset):
                 #rand_index = torch.randint(0, len(self.data_indices), (1,)).item()
                 random_idx = torch.randint(0, len(self.text_data), (1,)).item()
                 text = self.text_data[random_idx]
+                paired = torch.tensor(0).unsqueeze(0)
         
         if self.drop_text:
             if random.random() < self.drop_text_p:  # 10% 확률
                 text = ""                
 
 
-        return latent_tensor, text, timestep
+        return latent_tensor, text, timestep, paired
 
 
 def collate_fn(tokenizer):
     def collate(batch):
-        latents, texts, timesteps = zip(*batch)
+        latents, texts, timesteps, paireds = zip(*batch)
         
         latent_tensors = torch.stack(latents)
         timesteps = torch.cat(timesteps)
+        paireds = torch.cat(paireds)
 
         captions = []
         for caption in texts:
@@ -155,6 +157,7 @@ def collate_fn(tokenizer):
         return {
             "latents": latent_tensors,
             "input_ids": input_ids,
-            "timesteps": timesteps
+            "timesteps": timesteps,
+            "paireds":paireds
         }
     return collate
