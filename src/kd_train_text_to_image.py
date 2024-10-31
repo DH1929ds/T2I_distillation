@@ -714,6 +714,8 @@ def main():
     # with accelerator.main_process_first():
     #     for name, module in unet.named_modules():
     #         print(name)
+    num_parameters_unet = sum(p.numel() for p in unet.parameters() if p.requires_grad)
+    print(f"Number of trainable parameters in unet (student): {num_parameters_unet:,}")
     
     optimizer = optimizer_cls(
         parameters,
