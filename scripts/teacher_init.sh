@@ -10,7 +10,9 @@ EXTRA_TEXT_DIR="./data/laion400m-meta"
 UNET_CONFIG_PATH="./src/unet_config"
 UNET_NAME="bk_base" # option: ["bk_base", "bk_small", "bk_tiny"]
 
-OUTPUT_DIR="./results/unseen/BK-SDM_Seen(g)_teacher_init_"$UNET_NAME # please adjust it if needed
+#OUTPUT_DIR="./results/unseen/BK-SDM_Seen(g)_teacher_init_"$UNET_NAME # please adjust it if needed
+OUTPUT_DIR="./results/unseen/BKSDM_teacher_CVPR"$UNET_NAME # please adjust it if needed
+
 MODEL_ID="nota-ai/bk-sdm-${UNET_NAME#bk_}"
 
 BATCH_SIZE=64

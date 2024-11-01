@@ -407,27 +407,50 @@ def parse_args():
     parser.add_argument("--use_copy_weight_from_teacher", action="store_true", help="Whether to initialize unet student with teacher's weights",)
     parser.add_argument("--valid_prompt", type=str, default="a golden vase with different flowers")
 
+    # parser.add_argument("--valid_prompts", type=str, nargs='+', default=[
+    #     "A cat crawling into a white toilet seat.",
+    #     "a small elephant walks in a lush forest",
+    #     "A couple of elephants walking across a river.",
+    #     "A white horse looking through the window of a tall brick building.",
+    #     "A dog with goggles is in a motorcycle side car.",
+    #     "A large elephant walking next to a fallen tree.",
+    #     "A striped cat curled up above a comforter.",
+    #     "A cat laying bed in a small room.",
+    #     "A horse with a blanket on it eating hay.",
+    #     "Dog in bag with mesh and items around",
+    #     "A young sexy woman holding a tennis racquet on a tennis court.",
+    #     "The torso of a man who is holding a knife.",
+    #     "a person that is standing up in a tennis court",
+    #     "A man swinging a tennis racquet on a tennis court.",
+    #     "a young man in a grey shirt is going to cut his hair",
+    #     "a red fire hydrant near a dirt road with trees in the background",
+    #     "a tennis player attempting to reach a tennis ball",
+    #     "A bathroom with a tiled floor and a sink.",
+    #     "Bride and grooms arms cutting the wedding cake with fruit on top.",
+    #     "A bathroom with a brown shower curtain and white toilet"
+    # ])
+
     parser.add_argument("--valid_prompts", type=str, nargs='+', default=[
-        "A cat crawling into a white toilet seat.",
-        "a small elephant walks in a lush forest",
-        "A couple of elephants walking across a river.",
-        "A white horse looking through the window of a tall brick building.",
-        "A dog with goggles is in a motorcycle side car.",
-        "A large elephant walking next to a fallen tree.",
-        "A striped cat curled up above a comforter.",
-        "A cat laying bed in a small room.",
-        "A horse with a blanket on it eating hay.",
-        "Dog in bag with mesh and items around",
-        "A young sexy woman holding a tennis racquet on a tennis court.",
-        "The torso of a man who is holding a knife.",
-        "a person that is standing up in a tennis court",
-        "A man swinging a tennis racquet on a tennis court.",
-        "a young man in a grey shirt is going to cut his hair",
-        "a red fire hydrant near a dirt road with trees in the background",
-        "a tennis player attempting to reach a tennis ball",
-        "A bathroom with a tiled floor and a sink.",
-        "Bride and grooms arms cutting the wedding cake with fruit on top.",
-        "A bathroom with a brown shower curtain and white toilet"
+    "Two cakes sitting on a class table near a candle",
+    "The fresh fruit is left out on the counter",
+    "A couple of buses that are lined up by some buildings",
+    "A bicycle with a basket and a blue and pink umbrella",
+    "A kitchen with a stove top oven next to a white fridge.",
+    "A desk with a laptop, computer monitor, keyboard and mouse",
+    "A wooden and metal bench near a over grown bush",
+    "Two men in suits and ties next to plant",
+    "A woman standing next to the ocean flying a colorful kite",
+    "A baseball player wearing a leather glove standing in the dirt",
+    "A bird flies over a large body of water",
+    "A cat sitting underneath a blue and white umbrella",
+    "A dog jumps in order to catch a ring",
+    "A horse drawn carriage driving down a small road",
+    "A sheep standing on top of a rock",
+    "A brown cow walking through a tree filled forest",
+    "An elephant is carrying some plants in its tusk",
+    "A bear peaks out behind the grass in the woods",
+    "A zebra rolling on its back on the ground",
+    "A giraffe standing next to a tall tree"
     ])
     
     
@@ -1061,7 +1084,8 @@ def main():
                                 )
                             except subprocess.CalledProcessError as e:
                                 print(f"Error occurred while running script: {e}")
-
+                        else:
+                            time.sleep(300)
                         # Wait for all ranks to complete the evaluation
                         accelerator.wait_for_everyone()
                         evaluate_clip_score(args, accelerator)

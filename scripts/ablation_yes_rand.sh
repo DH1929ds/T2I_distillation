@@ -10,7 +10,7 @@ EXTRA_TEXT_DIR="./data/laion400m-meta"
 UNET_CONFIG_PATH="./src/unet_config"
 UNET_NAME="bk_base" # option: ["bk_base", "bk_small", "bk_tiny"]
 
-OUTPUT_DIR="./results/400M_random_cond_"$UNET_NAME # please adjust it if needed
+OUTPUT_DIR="./results/unseen/ours_400M_CVPR_"$UNET_NAME # please adjust it if needed
 MODEL_ID="nota-ai/bk-sdm-${UNET_NAME#bk_}"
 
 BATCH_SIZE=64
@@ -34,7 +34,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch --multi_gpu --num_processes ${NUM
   --seed 1234 \
   --gradient_accumulation_steps $GRAD_ACCUMULATION \
   --checkpointing_steps 25000 \
-  --valid_steps 1000 \
+  --valid_steps 10000 \
   --lambda_sd 1.0 --lambda_kd_output 1.0 --lambda_kd_feat 1.0 \
   --unet_config_path $UNET_CONFIG_PATH --unet_config_name $UNET_NAME \
   --output_dir $OUTPUT_DIR \

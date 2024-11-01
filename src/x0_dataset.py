@@ -27,7 +27,7 @@ class x0_dataset(Dataset):
         # Select metadata - Using unseen setting or not
         
         if use_unseen_setting:
-            seen_metadata_path = os.path.join(data_dir, "metadata_seen.csv") #exclude animal related texts from laion 212k dataset(metadata.csv)
+            seen_metadata_path = os.path.join(data_dir, "metadata_seen_CVPR.csv") #exclude animal related texts from laion 212k dataset(metadata.csv)
             print(f"Using data dir in {seen_metadata_path}!!!!!")
             self.metadata = pd.read_csv(seen_metadata_path)
             

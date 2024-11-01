@@ -37,7 +37,7 @@ COMMON_ARGS="
   --seed 1234
   --gradient_accumulation_steps $GRAD_ACCUMULATION
   --checkpointing_steps 25000
-  --valid_steps 1000
+  --valid_steps 10000
   --lambda_sd 1.0 --lambda_kd_output 1.0 --lambda_kd_feat 1.0
   --unet_config_path $UNET_CONFIG_PATH --unet_config_name $UNET_NAME
   --output_dir $OUTPUT_DIR
