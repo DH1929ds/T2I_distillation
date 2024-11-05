@@ -5,7 +5,7 @@
 MODEL_NAME="CompVis/stable-diffusion-v1-4" #"/home/work/StableDiffusion/stable-diffusion-v1-4"
 #TRAIN_DATA_DIR="./data/laion_aes/pt_cache_212k" # please adjust it if needed
 TRAIN_DATA_DIR="./data/laion_aes/latent_212k" # 절대 경로로 설정]
-# EXTRA_TEXT_DIR="./data/laion400m-meta"
+EXTRA_TEXT_DIR="./data/laion400m-meta"
 
 UNET_CONFIG_PATH="./src/unet_config"
 UNET_NAME="bk_base" # option: ["bk_base", "bk_small", "bk_tiny"]
@@ -21,6 +21,7 @@ StartTime=$(date +%s)
 CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch --multi_gpu --num_processes ${NUM_GPUS} src/kd_train_text_to_image.py \
   --pretrained_model_name_or_path $MODEL_NAME \
   --train_data_dir $TRAIN_DATA_DIR\
+  --extra_text_dir $EXTRA_TEXT_DIR\
   --use_ema \
   --resolution 512 --center_crop --random_flip \
   --train_batch_size $BATCH_SIZE \
@@ -40,9 +41,9 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch --multi_gpu --num_processes ${NUM
   --max_train_steps 400000 \
   --model_id $MODEL_ID \
   --dataloader_num_workers 4 \
-  --use_copy_weight_from_teacher \
   --random_conditioning \
   --drop_text \
   --max_train_samples 50000
+  # --use_copy_weight_from_teacher \
 EndTime=$(date +%s)
 echo "** KD training takes $(($EndTime - $StartTime)) seconds."

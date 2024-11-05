@@ -9,7 +9,7 @@ import numpy as np
 class x0_dataset(Dataset):
     def __init__(self, data_dir, extra_text_dir=None, n_T=1000, random_conditioning = False, 
                  random_conditioning_lambda=5, world_size=1, rank=0
-                 ,drop_text=True, drop_text_p=0.1, use_unseen_setting=False):
+                 ,drop_text=True, drop_text_p=0.1, use_unseen_setting=False, gpt_caption=False):
         """
         Args:
             data_dir (str): 데이터가 저장된 폴더의 경로.
@@ -23,6 +23,7 @@ class x0_dataset(Dataset):
         
         self.drop_text = drop_text
         self.drop_text_p = drop_text_p
+        self.gpt_caption = gpt_caption
         
         # Select metadata - Using unseen setting or not
         
@@ -55,36 +56,42 @@ class x0_dataset(Dataset):
         """
         # 메타데이터의 텍스트를 먼저 가져옵니다.
         text_data_list = [metameta['text']]
+        if self.gpt_caption:
+            gpt_caption_path = os.path.join(self.data_dir, "gpt_caption.csv")
+            gpt_caption = pd.read_csv(gpt_caption_path)
+            text_data_list.append(gpt_caption['prompt'].dropna())
+        
+        else:
+            if extra_text_dir is not None:
+                # extra_text_dir 내의 모든 Parquet 파일 목록을 가져옵니다.
+                parquet_files = [os.path.join(extra_text_dir, f) for f in os.listdir(extra_text_dir) if f.endswith('.parquet')]
 
-        if extra_text_dir is not None:
-            # extra_text_dir 내의 모든 Parquet 파일 목록을 가져옵니다.
-            parquet_files = [os.path.join(extra_text_dir, f) for f in os.listdir(extra_text_dir) if f.endswith('.parquet')]
+                rank_files = parquet_files[self.rank::self.world_size]
+                
+                for pq_file in rank_files:
+                    # Parquet 파일 로드
+                    try:
+                        df = pd.read_parquet(pq_file)
+                        print(f"read parquet {pq_file}")
+                        # 'text' 또는 'TEXT' 컬럼 확인
+                        if 'text' in df.columns:
+                            text_column = 'text'
+                        elif 'TEXT' in df.columns:
+                            text_column = 'TEXT'
+                        else:
+                            print(f"파일 {pq_file}에 'text' 컬럼이 없습니다. 건너뜁니다.")
+                            continue
+                        
+                        cleaned_text_data = df[text_column].dropna()  # NaN 또는 None 값을 제거
+                        text_data_list.append(cleaned_text_data)
 
-            rank_files = parquet_files[self.rank::self.world_size]
-            
-            for pq_file in rank_files:
-                # Parquet 파일 로드
-                try:
-                    df = pd.read_parquet(pq_file)
-                    print(f"read parquet {pq_file}")
-                    # 'text' 또는 'TEXT' 컬럼 확인
-                    if 'text' in df.columns:
-                        text_column = 'text'
-                    elif 'TEXT' in df.columns:
-                        text_column = 'TEXT'
-                    else:
-                        print(f"파일 {pq_file}에 'text' 컬럼이 없습니다. 건너뜁니다.")
+                    except Exception as e:
+                        print(f"파일 {pq_file}를 로드하는 중 에러 발생: {e}")
                         continue
-                    
-                    cleaned_text_data = df[text_column].dropna()  # NaN 또는 None 값을 제거
-                    text_data_list.append(cleaned_text_data)
-
-                except Exception as e:
-                    print(f"파일 {pq_file}를 로드하는 중 에러 발생: {e}")
-                    continue
 
         # 모든 텍스트 데이터를 하나의 시리즈로 결합
         combined_text_data = pd.concat(text_data_list, ignore_index=True)
+        print("total_text:",len(combined_text_data))
         return combined_text_data
         
 

@@ -227,6 +227,10 @@ def parse_args():
     
     parser.add_argument("--random_conditioning", action='store_true', help='perform condition sharing')
     parser.add_argument("--random_conditioning_lambda", type=float, default=5, help="condition share lambda")
+    
+    
+    parser.add_argument("--gpt_caption", action='store_true', help='use GPT caption')
+    
 
     parser.add_argument("--use_unseen_setting", action='store_true', help='use unseen setting(train_data, eval_data)')
 
@@ -751,7 +755,7 @@ def main():
     train_dataset = x0_dataset(data_dir=args.train_data_dir, extra_text_dir=args.extra_text_dir,n_T=noise_scheduler.num_train_timesteps, 
                                random_conditioning=args.random_conditioning, random_conditioning_lambda=args.random_conditioning_lambda, 
                                world_size=world_size, rank=local_rank, drop_text=args.drop_text, drop_text_p=args.drop_text_p, 
-                               use_unseen_setting=args.use_unseen_setting)
+                               use_unseen_setting=args.use_unseen_setting, gpt_caption = args.gpt_caption)
 
     with accelerator.main_process_first():
             if args.max_train_samples is not None:

@@ -10,7 +10,7 @@ TRAIN_DATA_DIR="./data/laion_aes/latent_212k" # 절대 경로로 설정]
 UNET_CONFIG_PATH="./src/unet_config"
 UNET_NAME="bk_base" # option: ["bk_base", "bk_small", "bk_tiny"]
 
-OUTPUT_DIR="./results/ablation_cache_size/base50k"$UNET_NAME # please adjust it if needed
+OUTPUT_DIR="./results/ablation_cache_size/base10k"$UNET_NAME # please adjust it if needed
 MODEL_ID="nota-ai/bk-sdm-${UNET_NAME#bk_}"
 
 BATCH_SIZE=64
@@ -41,7 +41,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch --multi_gpu --num_processes ${NUM
   --model_id $MODEL_ID \
   --dataloader_num_workers 4 \
   --drop_text \
-  --max_train_samples 50000
+  --max_train_samples 10000
   # --use_copy_weight_from_teacher \
   # --use_sd_loss \
 EndTime=$(date +%s)
