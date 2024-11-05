@@ -8,8 +8,8 @@ import numpy as np
 
 class x0_dataset(Dataset):
     def __init__(self, data_dir, extra_text_dir=None, n_T=1000, random_conditioning = False, 
-                 random_conditioning_lambda=5, world_size=1, rank=0
-                 ,drop_text=True, drop_text_p=0.1, use_unseen_setting=False, gpt_caption=False):
+                 random_conditioning_lambda=5, world_size=1, rank=0, drop_text=True, drop_text_p=0.1, 
+                 use_unseen_setting=False, gpt_caption=False, max_extra_text_samples=None):
         """
         Args:
             data_dir (str): 데이터가 저장된 폴더의 경로.
@@ -24,6 +24,7 @@ class x0_dataset(Dataset):
         self.drop_text = drop_text
         self.drop_text_p = drop_text_p
         self.gpt_caption = gpt_caption
+        self.max_extra_text_samples = max_extra_text_samples
         
         # Select metadata - Using unseen setting or not
         
@@ -63,6 +64,7 @@ class x0_dataset(Dataset):
         
         else:
             if extra_text_dir is not None:
+                extra_texts = []
                 # extra_text_dir 내의 모든 Parquet 파일 목록을 가져옵니다.
                 parquet_files = [os.path.join(extra_text_dir, f) for f in os.listdir(extra_text_dir) if f.endswith('.parquet')]
 
@@ -83,11 +85,28 @@ class x0_dataset(Dataset):
                             continue
                         
                         cleaned_text_data = df[text_column].dropna()  # NaN 또는 None 값을 제거
-                        text_data_list.append(cleaned_text_data)
+                        extra_texts.append(cleaned_text_data)
 
                     except Exception as e:
                         print(f"파일 {pq_file}를 로드하는 중 에러 발생: {e}")
                         continue
+                
+                # extra_texts를 하나의 Series로 합침
+                if extra_texts:
+                    extra_texts_combined = pd.concat(extra_texts, ignore_index=True)
+                else:
+                    extra_texts_combined = pd.Series()
+
+                # 텍스트 샘플의 개수를 제한
+                if self.max_extra_text_samples is not None:
+                    extra_texts_combined = extra_texts_combined.sample(
+                        n=min(self.max_extra_text_samples, len(extra_texts_combined)),
+                        random_state=42
+                    )
+
+                print("extra_text:", len(extra_texts_combined))
+                # text_data_list에 추가
+                text_data_list.append(extra_texts_combined)
 
         # 모든 텍스트 데이터를 하나의 시리즈로 결합
         combined_text_data = pd.concat(text_data_list, ignore_index=True)
