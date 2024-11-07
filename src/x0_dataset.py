@@ -100,7 +100,7 @@ class x0_dataset(Dataset):
                 # 텍스트 샘플의 개수를 제한
                 if self.max_extra_text_samples is not None:
                     extra_texts_combined = extra_texts_combined.sample(
-                        n=min(self.max_extra_text_samples, len(extra_texts_combined)),
+                        n=min(self.max_extra_text_samples/self.world_size, len(extra_texts_combined)),
                         random_state=42
                     )
 
