@@ -757,6 +757,10 @@ def main():
 
     with accelerator.main_process_first():
             if args.max_train_samples is not None:
+                original_seed = random.getstate()
+                random.seed(42)  # 원하는 시드 값 설정
+                indices = random.sample(range(len(train_dataset)), args.max_train_samples)
+                random.setstate(original_seed)
                 print("all:", len(train_dataset))
                 indices = random.sample(range(len(train_dataset)), args.max_train_samples)
                 train_dataset = Subset(train_dataset, indices)
