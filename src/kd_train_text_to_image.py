@@ -755,16 +755,14 @@ def main():
                                world_size=world_size, rank=local_rank, drop_text=args.drop_text, drop_text_p=args.drop_text_p, 
                                use_unseen_setting=args.use_unseen_setting, max_extra_text_samples=args.max_extra_text_samples)
 
-    with accelerator.main_process_first():
-            if args.max_train_samples is not None:
-                original_seed = random.getstate()
-                random.seed(42)  # 원하는 시드 값 설정
-                indices = random.sample(range(len(train_dataset)), args.max_train_samples)
-                random.setstate(original_seed)
-                print("all:", len(train_dataset))
-                indices = random.sample(range(len(train_dataset)), args.max_train_samples)
-                train_dataset = Subset(train_dataset, indices)
-                print("Subset:", len(train_dataset))
+    if args.max_train_samples is not None:
+        original_seed = random.getstate()
+        random.seed(42)  # 원하는 시드 값 설정
+        indices = random.sample(range(len(train_dataset)), args.max_train_samples)
+        random.setstate(original_seed)
+        print("all:", len(train_dataset))
+        train_dataset = Subset(train_dataset, indices)
+        print("Subset:", len(train_dataset))
 
     # DataLoaders creation:
     train_dataloader = torch.utils.data.DataLoader(
