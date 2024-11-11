@@ -49,7 +49,6 @@ COMMON_ARGS="
   --drop_text \
   --random_conditioning \
   --random_conditioning_lambda 5 \
-  --use_copy_weight_from_teacher \
   --dataloader_num_workers 2 \
   --max_extra_text_samples 500000
 "
