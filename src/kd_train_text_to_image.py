@@ -797,10 +797,10 @@ def main():
             unet, optimizer, train_dataloader, lr_scheduler
         )
         
-    if hasattr(conv_layers, 'module'):
+    if conv_layers and hasattr(conv_layers, 'module'):
         conv_module = conv_layers.module
     else:
-        conv_module = conv_layers
+        pass
     
     if torch.cuda.device_count() > 1:
         print(f"use multi-gpu: # gpus {torch.cuda.device_count()}")
