@@ -12,8 +12,8 @@ MODEL_NAME="CompVis/stable-diffusion-v1-4" #"/home/work/StableDiffusion/stable-d
 TRAIN_DATA_DIR="./data/laion_aes/latent_212k" # 절대 경로로 설정]
 EXTRA_TEXT_DIR="./data/laion400m-meta"
 
-UNET_CONFIG_PATH="./src/unet_config"
-UNET_NAME="bk_base" # option: ["bk_base", "bk_small", "bk_tiny"]
+UNET_CONFIG_PATH="./src/unet_config_channel_small_4"
+UNET_NAME="original" # option: ["bk_base", "bk_small", "bk_tiny"]
 
 OUTPUT_DIR="./results/P_TEST/sigmoid"
 MODEL_ID="nota-ai/bk-sdm-${UNET_NAME#bk_}"

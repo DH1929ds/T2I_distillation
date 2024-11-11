@@ -9,11 +9,10 @@ NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
 
 MODEL_NAME="CompVis/stable-diffusion-v1-4"
 TRAIN_DATA_DIR="./data/laion_aes/latent_212k" # 절대 경로로 설정
+UNET_CONFIG_PATH="./src/unet_config"
 
-UNET_CONFIG_PATH="./src/unet_config_channel_small_4"
-UNET_NAME="original" # option: ["bk_base", "bk_small", "bk_tiny"]
-
-OUTPUT_DIR="./results/ablation_text_size_ch/base"
+UNET_NAME="bk_base" # option: ["bk_base", "bk_small", "bk_tiny"]
+OUTPUT_DIR="./results/ablation_text_size/base"
 MODEL_ID="nota-ai/bk-sdm-${UNET_NAME#bk_}"
 
 BATCH_SIZE=64  # GPU당 batch size
