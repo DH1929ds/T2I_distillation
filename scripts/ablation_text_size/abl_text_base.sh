@@ -9,12 +9,10 @@ NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
 
 MODEL_NAME="CompVis/stable-diffusion-v1-4"
 TRAIN_DATA_DIR="./data/laion_aes/latent_212k" # 절대 경로로 설정
-EXTRA_TEXT_DIR="./data/laion400m-meta"
+UNET_CONFIG_PATH="./src/unet_config"
 
-UNET_CONFIG_PATH="./src/unet_config_channel_small_4"
-UNET_NAME="original" # option: ["bk_base", "bk_small", "bk_tiny"]
-
-OUTPUT_DIR="./results/ablation_text_size_ch/10M"
+UNET_NAME="bk_base" # option: ["bk_base", "bk_small", "bk_tiny"]
+OUTPUT_DIR="./results/ablation_text_size/base"
 MODEL_ID="nota-ai/bk-sdm-${UNET_NAME#bk_}"
 
 BATCH_SIZE=64  # GPU당 batch size
@@ -27,7 +25,6 @@ StartTime=$(date +%s)
 COMMON_ARGS="
   --pretrained_model_name_or_path $MODEL_NAME \
   --train_data_dir $TRAIN_DATA_DIR\
-  --extra_text_dir $EXTRA_TEXT_DIR\
   --use_ema \
   --resolution 512 --center_crop --random_flip \
   --train_batch_size $BATCH_SIZE \
@@ -47,11 +44,8 @@ COMMON_ARGS="
   --max_train_steps 400000 \
   --model_id $MODEL_ID \
   --drop_text \
-  --random_conditioning \
-  --random_conditioning_lambda 5 \
-  --dataloader_num_workers 2 \
-  --channel_mapping \
-  --max_extra_text_samples 10000000
+  --use_copy_weight_from_teacher \
+  --dataloader_num_workers 2
 "
 #--drop_text
 

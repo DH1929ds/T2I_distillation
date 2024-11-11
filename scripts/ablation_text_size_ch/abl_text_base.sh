@@ -13,7 +13,7 @@ TRAIN_DATA_DIR="./data/laion_aes/latent_212k" # 절대 경로로 설정
 UNET_CONFIG_PATH="./src/unet_config_channel_small_4"
 UNET_NAME="original" # option: ["bk_base", "bk_small", "bk_tiny"]
 
-OUTPUT_DIR="./results/ablation_text_size_ch/212k"
+OUTPUT_DIR="./results/ablation_text_size_ch/base"
 MODEL_ID="nota-ai/bk-sdm-${UNET_NAME#bk_}"
 
 BATCH_SIZE=64  # GPU당 batch size
@@ -45,7 +45,7 @@ COMMON_ARGS="
   --max_train_steps 400000 \
   --model_id $MODEL_ID \
   --drop_text \
-  --use_copy_weight_from_teacher \
+  --channel_mapping \
   --dataloader_num_workers 2
 "
 #--drop_text

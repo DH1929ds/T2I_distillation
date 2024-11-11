@@ -792,10 +792,16 @@ def main():
         unet, conv_layers, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
             unet, conv_layers, optimizer, train_dataloader, lr_scheduler
         )
+        if hasattr(conv_layers, 'module'):
+            conv_module = conv_layers.module
+        else:
+            conv_module = conv_layers
+        
     else:
         unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
             unet, optimizer, train_dataloader, lr_scheduler
         )
+        
     
     if torch.cuda.device_count() > 1:
         print(f"use multi-gpu: # gpus {torch.cuda.device_count()}")
@@ -961,7 +967,7 @@ def main():
                     if type(a_stu) is tuple: a_stu = a_stu[0]
                     
                     if args.channel_mapping:
-                        a_stu_ = conv_layers.module.convs[i](a_stu.to(conv_layers.module.convs[i].weight.dtype))
+                        a_stu_ = conv_module.convs[i](a_stu.to(conv_module.convs[i].weight.dtype))
                         # a_stu_ = a_stu_.to(a_tea.dtype)
                         tmp = F.mse_loss(a_stu_.float(), a_tea.detach().float(), reduction="mean")
                     else:

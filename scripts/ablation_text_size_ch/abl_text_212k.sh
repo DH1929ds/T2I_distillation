@@ -47,7 +47,7 @@ COMMON_ARGS="
   --drop_text \
   --random_conditioning \
   --random_conditioning_lambda 5 \
-  --use_copy_weight_from_teacher \
+  --channel_mapping \
   --dataloader_num_workers 2
 "
 #--drop_text
