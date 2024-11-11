@@ -56,11 +56,11 @@ class x0_dataset(Dataset):
             pandas.Series: 모든 텍스트 데이터가 포함된 시리즈.
         """
         # 메타데이터의 텍스트를 먼저 가져옵니다.
-        text_data_list = [metameta['text']]
+        text_data_list = [metameta['text'][self.rank::self.world_size]]
         if self.gpt_caption:
             gpt_caption_path = os.path.join(self.data_dir, "gpt_caption.csv")
             gpt_caption = pd.read_csv(gpt_caption_path)
-            text_data_list.append(gpt_caption['prompt'].dropna())
+            text_data_list.append(gpt_caption['prompt'][self.rank::self.world_size].dropna())
         
         else:
             if extra_text_dir is not None:
@@ -100,7 +100,7 @@ class x0_dataset(Dataset):
                 # 텍스트 샘플의 개수를 제한
                 if self.max_extra_text_samples is not None:
                     extra_texts_combined = extra_texts_combined.sample(
-                        n=min(self.max_extra_text_samples/self.world_size, len(extra_texts_combined)),
+                        n=min(int(self.max_extra_text_samples/self.world_size), len(extra_texts_combined)),
                         random_state=42
                     )
 
