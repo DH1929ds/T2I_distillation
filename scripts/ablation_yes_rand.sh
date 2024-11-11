@@ -2,7 +2,7 @@
 # Copyright 2023. Nota Inc. All Rights Reserved.
 # Code modified from https://github.com/huggingface/diffusers/tree/v0.15.0/examples/text_to_image
 # ------------------------------------------------------------------------------------
-MODEL_NAME="/home/work/StableDiffusion/stable-diffusion-v1-4" #"CompVis/stable-diffusion-v1-4"
+MODEL_NAME="CompVis/stable-diffusion-v1-4" #"/home/work/StableDiffusion/stable-diffusion-v1-4" #
 #TRAIN_DATA_DIR="./data/laion_aes/pt_cache_212k" # please adjust it if needed
 TRAIN_DATA_DIR="./data/laion_aes/latent_212k" # 절대 경로로 설정]
 EXTRA_TEXT_DIR="./data/laion400m-meta"
@@ -38,7 +38,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 accelerate launch --multi_gpu --num_process
   --lambda_sd 1.0 --lambda_kd_output 1.0 --lambda_kd_feat 1.0 \
   --unet_config_path $UNET_CONFIG_PATH --unet_config_name $UNET_NAME \
   --output_dir $OUTPUT_DIR \
-  --max_train_steps 400000 \
+  --max_train_steps 1000000 \
   --model_id $MODEL_ID \
   --drop_text \
   --random_conditioning \
