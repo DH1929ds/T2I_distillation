@@ -50,6 +50,7 @@ COMMON_ARGS="
   --random_conditioning \
   --random_conditioning_lambda 5 \
   --dataloader_num_workers 2 \
+  --channel_mapping \
   --max_extra_text_samples 1000000
 "
 #--drop_text

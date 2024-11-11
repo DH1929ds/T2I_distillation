@@ -47,6 +47,7 @@ COMMON_ARGS="
   --drop_text \
   --random_conditioning \
   --random_conditioning_lambda 5 \
+  --channel_mapping \
   --dataloader_num_workers 2
 "
 #--drop_text

@@ -45,6 +45,7 @@ COMMON_ARGS="
   --max_train_steps 400000 \
   --model_id $MODEL_ID \
   --drop_text \
+  --channel_mapping \
   --dataloader_num_workers 2
 "
 #--drop_text
