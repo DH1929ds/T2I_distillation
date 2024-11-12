@@ -135,6 +135,7 @@ class x0_dataset(Dataset):
         if self.random_conditioning:
             t_value = timestep.item()
             p = math.exp(-self.random_conditioning_lambda * (1 - t_value / self.n_T))
+            # p = 1 / (1 + math.exp(-20 * (t_value / self.n_T - 0.7)))
             # if t_value>self.n_T/2:
             #     p = math.exp(-self.random_conditioning_lambda * (1 - t_value / self.n_T))
             # else:
