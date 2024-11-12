@@ -10,7 +10,7 @@ EXTRA_TEXT_DIR="./data/laion400m-meta"
 UNET_CONFIG_PATH="./src/unet_config"
 UNET_NAME="bk_base" # option: ["bk_base", "bk_small", "bk_tiny"]
 
-OUTPUT_DIR="./results/unseen/ours_400M_CVPR_"$UNET_NAME # please adjust it if needed
+OUTPUT_DIR="./results/unseen/ours_400M_CVPR_sigomid" # please adjust it if needed
 MODEL_ID="nota-ai/bk-sdm-${UNET_NAME#bk_}"
 
 BATCH_SIZE=32
@@ -44,7 +44,7 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 accelerate launch --multi_gpu --num_process
   --random_conditioning \
   --random_conditioning_lambda 5 \
   --dataloader_num_workers 2 \
-  --use_unseen_setting \
-  --resume_from_checkpoint "latest"
+  --use_unseen_setting 
+  # --resume_from_checkpoint "latest"
 EndTime=$(date +%s)
 echo "** KD training takes $(($EndTime - $StartTime)) seconds."
