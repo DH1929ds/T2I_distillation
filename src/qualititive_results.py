@@ -15,8 +15,8 @@ from torchvision.utils import make_grid, save_image
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_id", type=str, default="CompVis/stable-diffusion-v1-4")
-    #parser.add_argument("--model_id", type=str, default="nota-ai/bk-sdm-base")
+    #parser.add_argument("--model_id", type=str, default="CompVis/stable-diffusion-v1-4")
+    parser.add_argument("--model_id", type=str, default="nota-ai/bk-sdm-base")
     parser.add_argument("--save_dir", type=str, default="./qualititive_results/bk-sdm-base",
                         help="$save_dir/grid is created for saving the grid image")
     parser.add_argument("--unet_path", type=str, default=None)
@@ -71,27 +71,28 @@ def parse_args():
 #     "A chihuahua in a sweater sitting in a cafe"
 # ])
     parser.add_argument("--valid_prompts", type=str, nargs='+', default=[
-        "A cat napping in a sunny spot on the window sill",
-        "A kitten playing with a ball of yarn on the floor",
-        "Two cats chasing each other around the living room",
-        "A cat perched on a high shelf watching birds outside",
-        "A group of cats lounging together in a cat cafe",
-        "A cat wearing a tiny bow tie looking regal",
-        "A fluffy cat curled up in a basket full of laundry",
-        "A cat stalking a laser pointer dot on the wall",
-        "A cat with striking green eyes hiding in a cardboard box",
-        "A Siamese cat watching fish in an aquarium",
-        "A black cat stretching on a rustic wooden floor",
-        "A Persian cat being groomed with a brush",
-        "An orange tabby cat eating treats from a hand",
-        "A cat peeking through the leaves of a houseplant",
-        "A cat balancing on a fence, tail flicking in the air",
-        "A calico cat nestled among pillows on a couch",
-        "A cat and a dog sleeping side by side on a rug",
-        "A kitten meowing for attention on the kitchen counter",
-        "A cat pawing at snowflakes through a glass door",
-        "A Bengal cat leaping to catch a feather toy"
+    "A giraffe eating leaves from the top of an acacia tree",
+    "A giraffe family walking across the savanna at sunset",
+    "Two giraffes standing side by side, their necks intertwined",
+    "A baby giraffe standing close to its mother",
+    "A giraffe bending its long neck to drink water from a pond",
+    "A giraffe silhouetted against the orange sky at dusk",
+    "A giraffe walking gracefully across the African plains",
+    "A giraffe eating leaves while birds perch on its back",
+    "A group of giraffes with their heads above the treetops",
+    "A giraffe peeking curiously over a tall fence",
+    "A giraffe's long tongue reaching out to grab leaves",
+    "A giraffe calmly chewing leaves while zebras graze nearby",
+    "A pair of giraffes running through the open savanna",
+    "A giraffe bending awkwardly to reach grass on the ground",
+    "A close-up of a giraffe's face with its large eyes and long eyelashes",
+    "A giraffe resting in the shade of a large tree",
+    "A giraffe walking past a safari jeep with tourists taking photos",
+    "A group of giraffes resting together under the hot sun",
+    "A giraffe looking down curiously at a small animal on the ground",
+    "A giraffe stretching its neck to reach the tallest branches"
     ])
+
 
 
 

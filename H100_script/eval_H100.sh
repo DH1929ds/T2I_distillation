@@ -10,13 +10,8 @@ CUDA_VISIBLE_DEVICES=$(nvidia-smi --query-gpu=index --format=csv,noheader | past
 NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
 
 # 여러 개의 unet_path를 쉼표로 구분하여 전달 (예: "path1,path2,path3")
-unet_paths="./results/abl_RC/BKSDM_init_R_Generated/checkpoint-50000, \
-./results/abl_RC/BKSDM_init_R_Generated/checkpoint-75000, \
-./results/abl_RC/BKSDM_init_R_Generated/checkpoint-100000, \
-./results/abl_RC/BKSDM_init_R_Generated/checkpoint-125000, \
-./results/abl_RC/BKSDM_init_R_Generated/checkpoint-150000, \
-./results/abl_RC/BKSDM_init_R_Generated/checkpoint-175000, \
-./results/abl_RC/BKSDM_init_R_Generated/checkpoint-200000
+unet_paths="./results/abl_RC/BKSDM_init_R_Generated/checkpoint-225000, \
+./results/ablation_text_size_ch/1M/checkpoint-25000
 "
 
 # 쉼표로 구분된 문자열을 배열로 변환
