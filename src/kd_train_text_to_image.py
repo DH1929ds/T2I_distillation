@@ -377,6 +377,8 @@ def parse_args():
             " training using `--resume_from_checkpoint`."
         ),
     )
+    parser.add_argument("--evaluation_step", type=int, default=25000, help=("evlauation step"),
+    )
     parser.add_argument(
         "--checkpoints_total_limit",
         type=int,
@@ -716,6 +718,10 @@ def main():
                         'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'down_blocks.3']    
         mapping_layers_tea = copy.deepcopy(mapping_layers)
         mapping_layers_stu = copy.deepcopy(mapping_layers)
+        # mapping_layers_tea = ['up_blocks.0.upsamplers.0.conv', 'up_blocks.1.upsamplers.0.conv', 'up_blocks.2.upsamplers.0.conv', 'up_blocks.3.attentions.2.proj_out',
+        #                 'down_blocks.0.downsamplers.0.conv', 'down_blocks.1.downsamplers.0.conv', 'down_blocks.2.downsamplers.0.conv', 'down_blocks.3.resnets.1.conv2']  
+        # mapping_layers_stu = ['up_blocks.0.upsamplers.0.conv', 'up_blocks.1.upsamplers.0.conv', 'up_blocks.2.upsamplers.0.conv', 'up_blocks.3.attentions.1.proj_out',
+        #                 'down_blocks.0.downsamplers.0.conv', 'down_blocks.1.downsamplers.0.conv', 'down_blocks.2.downsamplers.0.conv', 'down_blocks.3.resnets.0.conv2']  
 
     elif args.unet_config_name in ["bk_tiny"]:
         mapping_layers_tea = ['down_blocks.0', 'down_blocks.1', 'down_blocks.2.attentions.1.proj_out',
@@ -1049,7 +1055,7 @@ def main():
                         logger.info(f"Saved state to {save_path}")
                         os.makedirs(args.save_dir, exist_ok=True)
                     accelerator.wait_for_everyone()
-                                
+                if global_step % args.evaluation_step==0:      
                     ################################################ Evaluate IS, FID, CLIP SCORE - Unseen Setting #################################################
                     if args.use_unseen_setting:
                         sample_images_41k(args, accelerator, save_path)  # None으로 바뀌어 있으니까 test끝나고 바로 None 지워야함!! 
