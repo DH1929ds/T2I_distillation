@@ -56,7 +56,7 @@ from torchvision.utils import save_image, make_grid
 
 
 import diffusers
-from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel
+from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel, KarrasDiffusionSchedulers
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.utils import check_min_version, deprecate
@@ -227,6 +227,7 @@ def parse_args():
     
     parser.add_argument("--random_conditioning", action='store_true', help='perform condition sharing')
     parser.add_argument("--random_conditioning_lambda", type=float, default=5, help="condition share lambda")
+    parser.add_argument("--gpt_caption", action='store_true', help='use GPT caption')
     
     parser.add_argument("--max_extra_text_samples", type=int, default=None, help='limit extra text data')
 
@@ -375,6 +376,8 @@ def parse_args():
             "Save a checkpoint of the training state every X updates. These checkpoints are only suitable for resuming"
             " training using `--resume_from_checkpoint`."
         ),
+    )
+    parser.add_argument("--evaluation_step", type=int, default=25000, help=("evlauation step"),
     )
     parser.add_argument(
         "--checkpoints_total_limit",
@@ -574,7 +577,7 @@ def main():
         os.makedirs(args.output_dir, exist_ok=True)
 
     # Load scheduler, tokenizer and models.
-    noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
+    noise_scheduler = KarrasDiffusionSchedulers.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
     tokenizer = CLIPTokenizer.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="tokenizer", revision=args.revision
     )
@@ -715,6 +718,10 @@ def main():
                         'down_blocks.0', 'down_blocks.1', 'down_blocks.2', 'down_blocks.3']    
         mapping_layers_tea = copy.deepcopy(mapping_layers)
         mapping_layers_stu = copy.deepcopy(mapping_layers)
+        # mapping_layers_tea = ['up_blocks.0.upsamplers.0.conv', 'up_blocks.1.upsamplers.0.conv', 'up_blocks.2.upsamplers.0.conv', 'up_blocks.3.attentions.2.proj_out',
+        #                 'down_blocks.0.downsamplers.0.conv', 'down_blocks.1.downsamplers.0.conv', 'down_blocks.2.downsamplers.0.conv', 'down_blocks.3.resnets.1.conv2']  
+        # mapping_layers_stu = ['up_blocks.0.upsamplers.0.conv', 'up_blocks.1.upsamplers.0.conv', 'up_blocks.2.upsamplers.0.conv', 'up_blocks.3.attentions.1.proj_out',
+        #                 'down_blocks.0.downsamplers.0.conv', 'down_blocks.1.downsamplers.0.conv', 'down_blocks.2.downsamplers.0.conv', 'down_blocks.3.resnets.0.conv2']  
 
     elif args.unet_config_name in ["bk_tiny"]:
         mapping_layers_tea = ['down_blocks.0', 'down_blocks.1', 'down_blocks.2.attentions.1.proj_out',
@@ -753,7 +760,7 @@ def main():
     train_dataset = x0_dataset(data_dir=args.train_data_dir, extra_text_dir=args.extra_text_dir,n_T=noise_scheduler.num_train_timesteps, 
                                random_conditioning=args.random_conditioning, random_conditioning_lambda=args.random_conditioning_lambda, 
                                world_size=world_size, rank=local_rank, drop_text=args.drop_text, drop_text_p=args.drop_text_p, 
-                               use_unseen_setting=args.use_unseen_setting, max_extra_text_samples=args.max_extra_text_samples)
+                               use_unseen_setting=args.use_unseen_setting, gpt_caption = args.gpt_caption, max_extra_text_samples=args.max_extra_text_samples)
 
     if args.max_train_samples is not None:
         original_seed = random.getstate()
@@ -792,10 +799,16 @@ def main():
         unet, conv_layers, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
             unet, conv_layers, optimizer, train_dataloader, lr_scheduler
         )
+        if hasattr(conv_layers, 'module'):
+            conv_module = conv_layers.module
+        else:
+            conv_module = conv_layers
+        
     else:
         unet, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
             unet, optimizer, train_dataloader, lr_scheduler
         )
+        
     
     if torch.cuda.device_count() > 1:
         print(f"use multi-gpu: # gpus {torch.cuda.device_count()}")
@@ -961,7 +974,7 @@ def main():
                     if type(a_stu) is tuple: a_stu = a_stu[0]
                     
                     if args.channel_mapping:
-                        a_stu_ = conv_layers.module.convs[i](a_stu.to(conv_layers.module.convs[i].weight.dtype))
+                        a_stu_ = conv_module.convs[i](a_stu.to(conv_module.convs[i].weight.dtype))
                         # a_stu_ = a_stu_.to(a_tea.dtype)
                         tmp = F.mse_loss(a_stu_.float(), a_tea.detach().float(), reduction="mean")
                     else:
@@ -1042,10 +1055,10 @@ def main():
                         logger.info(f"Saved state to {save_path}")
                         os.makedirs(args.save_dir, exist_ok=True)
                     accelerator.wait_for_everyone()
-                                
+                if global_step % args.evaluation_step==0:      
                     ################################################ Evaluate IS, FID, CLIP SCORE - Unseen Setting #################################################
                     if args.use_unseen_setting:
-                        sample_images_41k(args, accelerator, save_path)  # None으로 바뀌어 있으니까 test끝나고 바로 None 지워야함!! 
+                        sample_images_41k(args, accelerator, save_path)
                         print(f"rank {local_rank} is done")
                         accelerator.wait_for_everyone()
                         if accelerator.is_main_process:
@@ -1089,7 +1102,7 @@ def main():
                             except subprocess.CalledProcessError as e:
                                 print(f"Error occurred while running script: {e}")
                         else:
-                            time.sleep(300)
+                            time.sleep(120)
                         # Wait for all ranks to complete the evaluation
                         accelerator.wait_for_everyone()
                         evaluate_clip_score(args, accelerator)

@@ -24,8 +24,8 @@ def generate_images(pipeline, dataloader, save_dir, metadata_file, device, accel
         images = pipeline(
             list(prompts),
             num_inference_steps=25,
-            guidance_scale=5,
-            # generator=generator,
+            guidance_scale=7.5,
+            generator=generator,
             output_type="pil"
         ).images
         for image, file_name, prompt in zip(images, file_names, prompts):

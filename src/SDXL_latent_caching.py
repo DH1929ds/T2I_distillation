@@ -19,12 +19,14 @@ class CsvDataset(Dataset):
 def generate_images(pipeline, dataloader, save_dir, metadata_file, device, accelerator):
     generator = torch.Generator(device=device).manual_seed(1234)
     metadata = []
-    for batch in tqdm(dataloader, desc="generating images"):
+    for i, batch in enumerate(tqdm(dataloader, desc="generating images")):
+        if i<800:
+            continue
         prompts, file_names = batch
         latents = pipeline(
             list(prompts),
-            num_inference_steps=8,
-            guidance_scale=0.0,
+            num_inference_steps=25,
+            guidance_scale=7.5,
             generator=generator,
             output_type="latent"
         ).images
@@ -35,6 +37,7 @@ def generate_images(pipeline, dataloader, save_dir, metadata_file, device, accel
                 "file_name": file_name,
                 "text": prompt
             })
+        accelerator.wait_for_everyone()     
     accelerator.wait_for_everyone()       
     all_metadata = accelerator.gather(metadata)
     if accelerator.is_local_main_process:
@@ -52,11 +55,11 @@ def main():
     accelerator = Accelerator()
     device = accelerator.device
     csv_file = "./data/laion_aes/latent_212k/metadata.csv"
-    save_dir = "./data/laion_aes/SDXL_latent_212k/latents"
+    save_dir = "./data/laion_aes/SDXL_latent_212k/SDXL_base_latents"
     metadata_file = "./data/laion_aes/SDXL_latent_212k/metadata.csv"
     os.makedirs(save_dir, exist_ok=True)
     dataset = CsvDataset(csv_file)
-    dataloader = DataLoader(dataset, batch_size=8, shuffle=False)
+    dataloader = DataLoader(dataset, batch_size=32, shuffle=False)
     
     # pipeline = StableDiffusionPipeline.from_pretrained(
     #     "CompVis/stable-diffusion-v1-4",
@@ -71,8 +74,9 @@ def main():
     ckpt = "sdxl_lightning_8step_unet.safetensors" # Use the correct ckpt for your step setting!
     # Load model.
     unet = UNet2DConditionModel.from_config(base, subfolder="unet").to("cuda", torch.float16)
-    unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device="cuda"))
-    pipe = StableDiffusionXLPipeline.from_pretrained(base, unet=unet, torch_dtype=torch.float16, variant="fp16")
+    # unet.load_state_dict(load_file(hf_hub_download(repo, ckpt), device="cuda"))
+    # pipe = StableDiffusionXLPipeline.from_pretrained(base, unet=unet, torch_dtype=torch.float16, variant="fp16")
+    pipe = StableDiffusionXLPipeline.from_pretrained(base, torch_dtype=torch.float16, variant="fp16")
     # Ensure sampler uses "trailing" timesteps and "sample" prediction type.
     pipe.scheduler = EulerDiscreteScheduler.from_config(
         pipe.scheduler.config, timestep_spacing="trailing"
