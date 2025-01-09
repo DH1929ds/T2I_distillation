@@ -2,29 +2,22 @@
 # Copyright 2023. Nota Inc. All Rights Reserved.
 # Code modified from https://github.com/huggingface/diffusers/tree/v0.15.0/examples/text_to_image
 # ------------------------------------------------------------------------------------
-CUDA_VISIBLE_DEVICES=$(nvidia-smi --query-gpu=index --format=csv,noheader | paste -sd "," -)
-
-# 사용 가능한 GPU 개수 자동으로 감지
-NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
-
-MODEL_NAME="CompVis/stable-diffusion-v1-4" #"/home/work/StableDiffusion/stable-diffusion-v1-4"
+MODEL_NAME="CompVis/stable-diffusion-v1-4"
 #TRAIN_DATA_DIR="./data/laion_aes/pt_cache_212k" # please adjust it if needed
 TRAIN_DATA_DIR="./data/laion_aes/latent_212k" # 절대 경로로 설정]
 EXTRA_TEXT_DIR="./data/laion400m-meta"
 
-UNET_CONFIG_PATH="./src/unet_config"
-UNET_NAME="bk_base" # option: ["bk_base", "bk_small", "bk_tiny"]
+UNET_CONFIG_PATH="./src/unet_config_channel_small_3"
+UNET_NAME="original" # option: ["original", "bk_base", "bk_small", "bk_tiny"]
 
-OUTPUT_DIR="./results/P_TEST/P=1"
-MODEL_ID="nota-ai/bk-sdm-${UNET_NAME#bk_}"
+OUTPUT_DIR="./results/compression/ch-3"
 
-BATCH_SIZE=64  # GPU당 batch size
-TOTAL_BATCH_SIZE=256  # BATCH_SIZE * GRAD_ACCUMULATION = 256이 되도록 설정
-GRAD_ACCUMULATION=$((TOTAL_BATCH_SIZE / (BATCH_SIZE * NUM_GPUS))) 
+BATCH_SIZE=64
+GRAD_ACCUMULATION=1
+NUM_GPUS=4
 StartTime=$(date +%s)
 
-# 공통 파라미터 설정
-COMMON_ARGS="
+CUDA_VISIBLE_DEVICES=0,1,2,3 accelerate launch --multi_gpu --num_processes ${NUM_GPUS} src/kd_train_text_to_image.py \
   --pretrained_model_name_or_path $MODEL_NAME \
   --train_data_dir $TRAIN_DATA_DIR\
   --extra_text_dir $EXTRA_TEXT_DIR\
@@ -45,19 +38,11 @@ COMMON_ARGS="
   --unet_config_path $UNET_CONFIG_PATH --unet_config_name $UNET_NAME \
   --output_dir $OUTPUT_DIR \
   --max_train_steps 400000 \
-  --model_id $MODEL_ID \
-  --dataloader_num_workers 4 \
+  --drop_text \
   --random_conditioning \
-  --random_conditioning_lambda 0 \
+  --random_conditioning_lambda 5 \
+  --channel_mapping \
+  --dataloader_num_workers 2 \
   --resume_from_checkpoint "latest"
-"
-
-# 멀티 GPU 또는 싱글 GPU 실행 조건
-if [ ${NUM_GPUS} -gt 1 ]; then
-  CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} accelerate launch --multi_gpu --num_processes ${NUM_GPUS} src/kd_train_text_to_image.py $COMMON_ARGS
-else
-  CUDA_VISIBLE_DEVICES=${CUDA_VISIBLE_DEVICES} accelerate launch src/kd_train_text_to_image.py $COMMON_ARGS
-fi
-
 EndTime=$(date +%s)
 echo "** KD training takes $(($EndTime - $StartTime)) seconds."

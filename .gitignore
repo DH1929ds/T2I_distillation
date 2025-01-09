@@ -11,5 +11,6 @@ mlruns
 .nfs*
 score
 mainpaper_qualitative_results
+Appendix_qualitative_results
 diffusion_db_qual.zip
 src/eff_eval*

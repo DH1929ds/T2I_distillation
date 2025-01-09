@@ -3,12 +3,12 @@ import argparse
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--metadata_path", type=str, default="./metadata.parquet")
-    parser.add_argument("--output_csv", type=str, default="./random_samples.csv")
+    parser.add_argument("--metadata_path", type=str, default="./Appendix_qualitative_results/metadata.parquet")
+    parser.add_argument("--output_csv", type=str, default="./Appendix_qualitative_results/diffusion_db_unseen_500K.csv")
     args = parser.parse_args()
     return args
 
-def create_random_prompts_csv(metadata_path, output_csv, num_samples=500):
+def create_random_prompts_csv(metadata_path, output_csv, num_samples=500000):
     # Load metadata from the parquet file
     metadata_df = pd.read_parquet(metadata_path)
     
@@ -16,7 +16,7 @@ def create_random_prompts_csv(metadata_path, output_csv, num_samples=500):
     metadata_df = metadata_df[["image_name", "prompt"]]
     
     # Randomly sample `num_samples` rows from the dataset
-    random_samples = metadata_df.sample(n=num_samples, random_state=42)
+    random_samples = metadata_df.sample(n=num_samples, random_state=100)
     
     # Save the sampled rows to a CSV file
     random_samples.to_csv(output_csv, index=False, header=True)
@@ -25,7 +25,15 @@ def create_random_prompts_csv(metadata_path, output_csv, num_samples=500):
 if __name__ == "__main__":
     args = parse_args()
     create_random_prompts_csv(args.metadata_path, args.output_csv)
+    
 
+
+
+
+# Index(['image_name', 'prompt', 'part_id', 'seed', 'step', 'cfg', 'sampler',
+#        'width', 'height', 'user_name', 'timestamp', 'image_nsfw',
+#        'prompt_nsfw'],
+#       dtype='object')
 
 # import pandas as pd
 # import numpy as np

@@ -12,20 +12,20 @@ from torchvision.utils import make_grid, save_image
 
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--model_id", type=str, default="CompVis/stable-diffusion-v1-4")
-    #parser.add_argument("--model_id", type=str, default="nota-ai/bk-sdm-tiny")
+    #parser.add_argument("--model_id", type=str, default="CompVis/stable-diffusion-v1-4")
+    parser.add_argument("--model_id", type=str, default="nota-ai/bk-sdm-base")
     
-    parser.add_argument("--save_dir", type=str, default="./qualtitive_results_unseen_seen",
+    parser.add_argument("--save_dir", type=str, default="./Appendix_qualitative_results/unseen_diffDB_onlyanimals",
                         help="$save_dir/grid is created for saving the grid image")
     parser.add_argument("--unet_path", type=str, default=None)
     parser.add_argument("--num_inference_steps", type=int, default=25)
     parser.add_argument('--device', type=str, default='cuda:0', help='Device to use, cuda:gpu_number or cpu')
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--img_sz", type=int, default=512)
-    parser.add_argument("--batch_sz", type=int, default=25)
+    parser.add_argument("--batch_sz", type=int, default=50)
     parser.add_argument("--unet_config", type=str, default=None)
     parser.add_argument("--model_name", type=str, default=None)
-    parser.add_argument("--csv_path", type=str, default="./random_samples.csv")
+    parser.add_argument("--csv_path", type=str, default="./Appendix_qualitative_results/DiffDB_unseen_5K.csv")
 
     args = parser.parse_args()
     return args

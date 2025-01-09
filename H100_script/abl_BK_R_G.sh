@@ -7,27 +7,26 @@ CUDA_VISIBLE_DEVICES=$(nvidia-smi --query-gpu=index --format=csv,noheader | past
 # 사용 가능한 GPU 개수 자동으로 감지
 NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
 
-MODEL_NAME="CompVis/stable-diffusion-v1-4" #"/home/work/StableDiffusion/stable-diffusion-v1-4"
-#TRAIN_DATA_DIR="./data/laion_aes/pt_cache_212k" # please adjust it if needed
-TRAIN_DATA_DIR="./data/laion_aes/latent_212k" # 절대 경로로 설정]
+MODEL_NAME="CompVis/stable-diffusion-v1-4"
+TRAIN_DATA_DIR="./data/laion_aes/latent_212k" # 절대 경로로 설정
 EXTRA_TEXT_DIR="./data/laion400m-meta"
 
 UNET_CONFIG_PATH="./src/unet_config"
-UNET_NAME="bk_base" # option: ["bk_base", "bk_small", "bk_tiny"]
 
-OUTPUT_DIR="./results/P_TEST/P=1"
+UNET_NAME="bk_base" # option: ["bk_base", "bk_small", "bk_tiny"]
+OUTPUT_DIR="./results/abl_RC/BKSDM_init_R_Generated"
 MODEL_ID="nota-ai/bk-sdm-${UNET_NAME#bk_}"
 
 BATCH_SIZE=64  # GPU당 batch size
 TOTAL_BATCH_SIZE=256  # BATCH_SIZE * GRAD_ACCUMULATION = 256이 되도록 설정
-GRAD_ACCUMULATION=$((TOTAL_BATCH_SIZE / (BATCH_SIZE * NUM_GPUS))) 
+GRAD_ACCUMULATION=$((TOTAL_BATCH_SIZE / (BATCH_SIZE * NUM_GPUS)))  # 동적으로 GRAD_ACCUMULATION 계산
+
 StartTime=$(date +%s)
 
 # 공통 파라미터 설정
 COMMON_ARGS="
   --pretrained_model_name_or_path $MODEL_NAME \
   --train_data_dir $TRAIN_DATA_DIR\
-  --extra_text_dir $EXTRA_TEXT_DIR\
   --use_ema \
   --resolution 512 --center_crop --random_flip \
   --train_batch_size $BATCH_SIZE \
@@ -46,11 +45,12 @@ COMMON_ARGS="
   --output_dir $OUTPUT_DIR \
   --max_train_steps 400000 \
   --model_id $MODEL_ID \
-  --dataloader_num_workers 4 \
-  --random_conditioning \
-  --random_conditioning_lambda 0 \
+  --dataloader_num_workers 2 \
+  --use_sd_loss \
   --resume_from_checkpoint "latest"
 "
+# \
+#--drop_text
 
 # 멀티 GPU 또는 싱글 GPU 실행 조건
 if [ ${NUM_GPUS} -gt 1 ]; then
