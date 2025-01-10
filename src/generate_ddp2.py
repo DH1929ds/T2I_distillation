@@ -12,11 +12,11 @@ import math
 import pandas as pd
 import shutil
 
-def sample_images_30k(args, accelerator, save_path=None):
+def sample_images_30k(args, accelerator, SDXL, save_path=None):
     device = accelerator.device
 
     pipeline = InferencePipeline(weight_folder=args.model_id, seed=args.clip_seed, device=device)
-    pipeline.set_pipe_and_generator()
+    pipeline.set_pipe_and_generator(SDXL)
     
     pipeline.pipe.set_progress_bar_config(disable=True)
 

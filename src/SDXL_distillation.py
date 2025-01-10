@@ -39,6 +39,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.utils.checkpoint
+from diffusers.utils.torch_utils import randn_tensor
 from torch.utils.data import Subset
 import transformers
 from accelerate import Accelerator, InitProcessGroupKwargs
@@ -48,7 +49,7 @@ from datasets import load_dataset
 from packaging import version
 from torchvision import transforms
 from tqdm.auto import tqdm
-from transformers import CLIPTextModel, CLIPTokenizer
+from transformers import CLIPTextModel, CLIPTokenizer, CLIPTextModelWithProjection
 from eval_clip_score_ddp import evaluate_clip_score, evaluate_clip_score_unseen_setting
 from generate_ddp2 import sample_images_30k, sample_images_41k
 from eval_score_wandb_log import log_eval_scores, log_eval_scores_unseen_setting
@@ -56,7 +57,7 @@ from torchvision.utils import save_image, make_grid
 
 
 import diffusers
-from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel, KarrasDiffusionSchedulers
+from diffusers import AutoencoderKL, DDPMScheduler, StableDiffusionPipeline, UNet2DConditionModel, EulerDiscreteScheduler
 from diffusers.optimization import get_scheduler
 from diffusers.training_utils import EMAModel
 from diffusers.utils import check_min_version, deprecate
@@ -94,8 +95,54 @@ def add_hook(net, mem, mapping_layers):
     for n, m in net.named_modules():
         if n in mapping_layers:
             m.register_forward_hook(get_activation(mem, n))
+    
+def SDXL_encode_prompt(
+    unet,
+    text_encoder,
+    text_encoder_2,
+    text_input_ids,
+    text_input_ids_2,
+    device: Optional[torch.device] = None
+):
+    
+    prompt = [prompt] if isinstance(prompt, str) else prompt
 
-########################################################################## MIIL ##############################################################################################3
+
+    # Define tokenizers and text encoders
+    # tokenizers = [self.tokenizer, self.tokenizer_2] if self.tokenizer is not None else [self.tokenizer_2]
+    text_encoders = (
+        [text_encoder, text_encoder_2] if text_encoder is not None else [text_encoder_2]
+    )
+
+    text_input_idss = [text_input_ids, text_input_ids_2]
+    prompt_embeds_list = []
+    for text_input_id, text_encoder in zip(text_input_idss, text_encoders):
+        
+        prompt_embeds = text_encoder(text_input_id.to(device), output_hidden_states=True)
+
+        # We are only ALWAYS interested in the pooled output of the final text encoder
+        pooled_prompt_embeds = prompt_embeds[0]
+        prompt_embeds = prompt_embeds.hidden_states[-2]
+
+        prompt_embeds_list.append(prompt_embeds)
+
+        prompt_embeds = torch.concat(prompt_embeds_list, dim=-1)
+
+    
+    if text_encoder_2 is not None:
+        prompt_embeds = prompt_embeds.to(dtype=text_encoder_2.dtype, device=device)
+    else:
+        prompt_embeds = prompt_embeds.to(dtype=unet.dtype, device=device)
+
+    bs_embed, seq_len, _ = prompt_embeds.shape
+    # duplicate text embeddings for each generation per prompt, using mps friendly method
+    prompt_embeds = prompt_embeds.view(bs_embed, seq_len, -1)
+
+    pooled_prompt_embeds = pooled_prompt_embeds.view(bs_embed, -1)
+
+    return prompt_embeds, pooled_prompt_embeds
+   
+########################################################################################################################################################################
 def get_input_activation(mem, name):
     def get_input_hook(module, input):
         if isinstance(input, tuple):
@@ -112,7 +159,7 @@ def add_pre_hook(net, mem, mapping_layers):
         if n in mapping_layers:
             # forward_pre_hook을 사용하여 입력값을 후킹
             m.register_forward_pre_hook(get_input_activation(mem, n))
-########################################################################## MIIL ##############################################################################################3
+########################################################################################################################################################################3
 
 
 def copy_weight_from_teacher(unet_stu, unet_tea, student_type):
@@ -140,7 +187,15 @@ def copy_weight_from_teacher(unet_stu, unet_tea, student_type):
         connect_info['up_blocks.2.resnets.0.'] = 'up_blocks.3.resnets.0.'
         connect_info['up_blocks.2.attentions.0.'] = 'up_blocks.3.attentions.0.'
         connect_info['up_blocks.2.resnets.1.'] = 'up_blocks.3.resnets.2.'
-        connect_info['up_blocks.2.attentions.1.'] = 'up_blocks.3.attentions.2.'       
+        connect_info['up_blocks.2.attentions.1.'] = 'up_blocks.3.attentions.2.'  
+        
+    elif student_type in ["KOALA1B", "KOALA700M"]:
+        connect_info['up_blocks.0.resnets.1.'] = 'up_blocks.0.resnets.2.'
+        connect_info['up_blocks.0.attentions.1.'] = 'up_blocks.0.attentions.2.'
+        connect_info['up_blocks.1.resnets.1.'] = 'up_blocks.1.resnets.2.'
+        connect_info['up_blocks.1.attentions.1.'] = 'up_blocks.1.attentions.2.'
+        connect_info['up_blocks.2.resnets.1.'] = 'up_blocks.2.resnets.2.'
+        
     else:
         raise NotImplementedError
 
@@ -257,6 +312,11 @@ def parse_args():
         "--random_flip",
         action="store_true",
         help="whether to randomly flip images horizontally",
+    )
+    parser.add_argument(
+        "--SDXL",
+        action="store_true",
+        help="compress SDXL",
     )
     parser.add_argument(
         "--train_batch_size", type=int, default=16, help="Batch size (per device) for the training dataloader."
@@ -577,13 +637,28 @@ def main():
         os.makedirs(args.output_dir, exist_ok=True)
 
     # Load scheduler, tokenizer and models.
-    noise_scheduler = KarrasDiffusionSchedulers.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
+    noise_scheduler = EulerDiscreteScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
     tokenizer = CLIPTokenizer.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="tokenizer", revision=args.revision
     )
+    try:
+        tokenizer_2 = CLIPTokenizer.from_pretrained(
+            args.pretrained_model_name_or_path, subfolder="tokenizer_2", revision=args.revision
+        )
+    except OSError:
+        tokenizer_2 = None
+        
     text_encoder = CLIPTextModel.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="text_encoder", revision=args.revision
     )
+    
+    try:
+        text_encoder_2 = CLIPTextModelWithProjection.from_pretrained(
+            args.pretrained_model_name_or_path, subfolder="text_encoder_2", revision=args.revision
+        )
+    except OSError:
+        text_encoder_2 = None
+    
     vae = AutoencoderKL.from_pretrained(args.pretrained_model_name_or_path, subfolder="vae", revision=args.revision)
 
     # Define teacher and student
@@ -729,6 +804,158 @@ def main():
         mapping_layers_stu = ['down_blocks.0', 'down_blocks.1', 'down_blocks.2.attentions.0.proj_out',
                                 'up_blocks.0', 'up_blocks.1', 'up_blocks.2']  
 
+    elif args.unet_config_name in ["KOALA1B"]:
+        mapping_layers_tea = [
+            #down0
+            'down_blocks.0.downsamplers.0.conv',
+            
+            #down1
+            'down_blocks.1.attentions.0.transformer_blocks.0.attn1', 'down_blocks.1.attentions.0.transformer_blocks.1.attn1',
+                          
+            #down2   
+            'down_blocks.2.attentions.0.transformer_blocks.0.attn1', 'down_blocks.2.attentions.0.transformer_blocks.1.attn1', 
+            'down_blocks.2.attentions.0.transformer_blocks.2.attn1', 'down_blocks.2.attentions.0.transformer_blocks.3.attn1',
+            'down_blocks.2.attentions.0.transformer_blocks.4.attn1', 'down_blocks.2.attentions.0.transformer_blocks.5.attn1',
+            
+            #mid
+            'mid_block.attentions.0.transformer_blocks.0.attn1', 'mid_block.attentions.0.transformer_blocks.1.attn1', 
+            'mid_block.attentions.0.transformer_blocks.2.attn1', 'mid_block.attentions.0.transformer_blocks.3.attn1',
+            'mid_block.2.attentions.0.transformer_blocks.4.attn1', 'mid_block.2.attentions.0.transformer_blocks.5.attn1',
+            
+            #up0
+            #up0-0
+            'up_blocks.0.attentions.0.transformer_blocks.0.attn1', 'up_blocks.0.attentions.0.transformer_blocks.1.attn1', 
+            'up_blocks.0.attentions.0.transformer_blocks.2.attn1', 'up_blocks.0.attentions.0.transformer_blocks.3.attn1',
+            'up_blocks.0.attentions.0.transformer_blocks.4.attn1', 'up_blocks.0.attentions.0.transformer_blocks.5.attn1',
+            
+            #up0-2
+            'up_blocks.0.attentions.2.transformer_blocks.0.attn1', 'up_blocks.0.attentions.2.transformer_blocks.1.attn1', 
+            'up_blocks.0.attentions.2.transformer_blocks.2.attn1', 'up_blocks.0.attentions.2.transformer_blocks.3.attn1',
+            'up_blocks.0.attentions.2.transformer_blocks.4.attn1', 'up_blocks.0.attentions.2.transformer_blocks.5.attn1',
+            
+            #up1
+            #up1-0
+            'up_blocks.1.attentions.0.transformer_blocks.0.attn1', 'up_blocks.1.attentions.0.transformer_blocks.1.attn1',
+            
+            #up1-2
+            'up_blocks.1.attentions.2.transformer_blocks.0.attn1', 'up_blocks.1.attentions.2.transformer_blocks.1.attn1',
+            
+            #up2
+            'up_blocks.2.resnets.2.conv2'
+        ] 
+        
+        mapping_layers_stu = [
+            #down0
+            'down_blocks.0.downsamplers.0.conv',
+            
+            #down1
+            'down_blocks.1.attentions.0.transformer_blocks.0.attn1', 'down_blocks.1.attentions.0.transformer_blocks.1.attn1',
+                          
+            #down2   
+            'down_blocks.2.attentions.0.transformer_blocks.0.attn1', 'down_blocks.2.attentions.0.transformer_blocks.1.attn1', 
+            'down_blocks.2.attentions.0.transformer_blocks.2.attn1', 'down_blocks.2.attentions.0.transformer_blocks.3.attn1',
+            'down_blocks.2.attentions.0.transformer_blocks.4.attn1', 'down_blocks.2.attentions.0.transformer_blocks.5.attn1',
+            
+            #mid
+            'mid_block.attentions.0.transformer_blocks.0.attn1', 'mid_block.attentions.0.transformer_blocks.1.attn1', 
+            'mid_block.attentions.0.transformer_blocks.2.attn1', 'mid_block.attentions.0.transformer_blocks.3.attn1',
+            'mid_block.2.attentions.0.transformer_blocks.4.attn1', 'mid_block.2.attentions.0.transformer_blocks.5.attn1',
+            
+            #up0
+            #up0-0
+            'up_blocks.0.attentions.0.transformer_blocks.0.attn1', 'up_blocks.0.attentions.0.transformer_blocks.1.attn1', 
+            'up_blocks.0.attentions.0.transformer_blocks.2.attn1', 'up_blocks.0.attentions.0.transformer_blocks.3.attn1',
+            'up_blocks.0.attentions.0.transformer_blocks.4.attn1', 'up_blocks.0.attentions.0.transformer_blocks.5.attn1',
+            
+            #up0-2
+            'up_blocks.0.attentions.1.transformer_blocks.0.attn1', 'up_blocks.0.attentions.1.transformer_blocks.1.attn1', 
+            'up_blocks.0.attentions.1.transformer_blocks.2.attn1', 'up_blocks.0.attentions.1.transformer_blocks.3.attn1',
+            'up_blocks.0.attentions.1.transformer_blocks.4.attn1', 'up_blocks.0.attentions.1.transformer_blocks.5.attn1',
+            
+            #up1
+            #up1-0
+            'up_blocks.1.attentions.0.transformer_blocks.0.attn1', 'up_blocks.1.attentions.0.transformer_blocks.1.attn1',
+            
+            #up1-2
+            'up_blocks.1.attentions.1.transformer_blocks.0.attn1', 'up_blocks.1.attentions.1.transformer_blocks.1.attn1',
+            
+            #up2
+            'up_blocks.2.resnets.2.conv2'         
+        ]
+        
+    elif args.unet_config_name in ["KOALA700M"]:
+        mapping_layers_tea = [
+            #down0
+            'down_blocks.0.downsamplers.0.conv',
+            
+            #down1
+            'down_blocks.1.attentions.0.transformer_blocks.0.attn1', 'down_blocks.1.attentions.0.transformer_blocks.1.attn1',
+                          
+            #down2   
+            'down_blocks.2.attentions.0.transformer_blocks.0.attn1', 'down_blocks.2.attentions.0.transformer_blocks.1.attn1', 
+            'down_blocks.2.attentions.0.transformer_blocks.2.attn1', 'down_blocks.2.attentions.0.transformer_blocks.3.attn1',
+            'down_blocks.2.attentions.0.transformer_blocks.4.attn1', 'down_blocks.2.attentions.0.transformer_blocks.5.attn1',
+            
+            #mid
+            'mid_block.attentions.0.transformer_blocks.0.attn1', 'mid_block.attentions.0.transformer_blocks.1.attn1', 
+            'mid_block.attentions.0.transformer_blocks.2.attn1', 'mid_block.attentions.0.transformer_blocks.3.attn1',
+            'mid_block.2.attentions.0.transformer_blocks.4.attn1', 'mid_block.2.attentions.0.transformer_blocks.5.attn1',
+            
+            #up0
+            #up0-0
+            'up_blocks.0.attentions.0.transformer_blocks.0.attn1', 'up_blocks.0.attentions.0.transformer_blocks.1.attn1', 
+            'up_blocks.0.attentions.0.transformer_blocks.2.attn1', 'up_blocks.0.attentions.0.transformer_blocks.3.attn1',
+            'up_blocks.0.attentions.0.transformer_blocks.4.attn1', 'up_blocks.0.attentions.0.transformer_blocks.5.attn1',
+            
+            #up0-2
+            'up_blocks.0.attentions.2.transformer_blocks.0.attn1', 'up_blocks.0.attentions.2.transformer_blocks.1.attn1', 
+            'up_blocks.0.attentions.2.transformer_blocks.2.attn1', 'up_blocks.0.attentions.2.transformer_blocks.3.attn1',
+            'up_blocks.0.attentions.2.transformer_blocks.4.attn1', 'up_blocks.0.attentions.2.transformer_blocks.5.attn1',
+            
+            #up1
+            #up1-0
+            'up_blocks.1.attentions.0.transformer_blocks.0.attn1', 'up_blocks.1.attentions.0.transformer_blocks.1.attn1',
+            
+            #up1-2
+            'up_blocks.1.attentions.2.transformer_blocks.0.attn1', 'up_blocks.1.attentions.2.transformer_blocks.1.attn1',
+            
+            #up2
+            'up_blocks.2.resnets.2.conv2'
+        ] 
+        
+        mapping_layers_stu = [
+            #down0
+            'down_blocks.0.downsamplers.0.conv',
+            
+            #down1
+            'down_blocks.1.attentions.0.transformer_blocks.0.attn1', 'down_blocks.1.attentions.0.transformer_blocks.1.attn1',
+                          
+            #down2   
+            'down_blocks.2.attentions.0.transformer_blocks.0.attn1', 'down_blocks.2.attentions.0.transformer_blocks.1.attn1', 
+            'down_blocks.2.attentions.0.transformer_blocks.2.attn1', 'down_blocks.2.attentions.0.transformer_blocks.3.attn1',
+            'down_blocks.2.attentions.0.transformer_blocks.4.attn1',
+            
+            #up0
+            #up0-0
+            'up_blocks.0.attentions.0.transformer_blocks.0.attn1', 'up_blocks.0.attentions.0.transformer_blocks.1.attn1', 
+            'up_blocks.0.attentions.0.transformer_blocks.2.attn1', 'up_blocks.0.attentions.0.transformer_blocks.3.attn1',
+            'up_blocks.0.attentions.0.transformer_blocks.4.attn1',
+            
+            #up0-2
+            'up_blocks.0.attentions.1.transformer_blocks.0.attn1', 'up_blocks.0.attentions.1.transformer_blocks.1.attn1', 
+            'up_blocks.0.attentions.1.transformer_blocks.2.attn1', 'up_blocks.0.attentions.1.transformer_blocks.3.attn1',
+            'up_blocks.0.attentions.1.transformer_blocks.4.attn1',
+            
+            #up1
+            #up1-0
+            'up_blocks.1.attentions.0.transformer_blocks.0.attn1', 'up_blocks.1.attentions.0.transformer_blocks.1.attn1',
+            
+            #up1-2
+            'up_blocks.1.attentions.1.transformer_blocks.0.attn1', 'up_blocks.1.attentions.1.transformer_blocks.1.attn1',
+            
+            #up2
+            'up_blocks.2.resnets.2.conv2'         
+        ]
 
     if args.channel_mapping:
         teacher_channels_list = get_layer_output_channels(unet_teacher, mapping_layers_tea)
@@ -775,7 +1002,7 @@ def main():
     train_dataloader = torch.utils.data.DataLoader(
         train_dataset,
         shuffle=True,
-        collate_fn=collate_fn(tokenizer),
+        collate_fn=collate_fn(tokenizer, tokenizer_2),
         batch_size=args.train_batch_size,
         num_workers=args.dataloader_num_workers,
     )
@@ -834,6 +1061,8 @@ def main():
     text_encoder.to(accelerator.device, dtype=weight_dtype)
     vae.to(accelerator.device, dtype=weight_dtype)
     unet_teacher.to(accelerator.device, dtype=weight_dtype)
+    if text_encoder_2 is not None:
+        text_encoder_2.to(accelerator.device, dtype=weight_dtype)
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
@@ -1084,7 +1313,7 @@ def main():
      
                     ################################################ Evaluate IS, FID, CLIP SCORE - Base Setting ###################################################
                     else:
-                        sample_images_30k(args, accelerator, save_path)
+                        sample_images_30k(args, accelerator, args.SDXL, save_path)
                         print(f"rank {local_rank} is done")
                         accelerator.wait_for_everyone()
                         if accelerator.is_main_process:

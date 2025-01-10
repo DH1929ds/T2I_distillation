@@ -156,7 +156,7 @@ class x0_dataset(Dataset):
         return latent_tensor, text, timestep, paired
 
 
-def collate_fn(tokenizer):
+def collate_fn(tokenizer, tokenizer_2):
     def collate(batch):
         latents, texts, timesteps, paireds = zip(*batch)
         
@@ -181,9 +181,18 @@ def collate_fn(tokenizer):
         
         input_ids = inputs.input_ids
 
+        if tokenizer_2 is not None:
+            inputs_2 = tokenizer(
+                captions, max_length=tokenizer.model_max_length, padding="max_length", truncation=True, return_tensors="pt"
+            )      
+            input_ids_2 = inputs_2.input_ids
+        else:
+            input_ids_2=None
+        
         return {
             "latents": latent_tensors,
             "input_ids": input_ids,
+            "input_ids_2": input_ids_2,
             "timesteps": timesteps,
             "paireds":paireds
         }

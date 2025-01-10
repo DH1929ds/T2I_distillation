@@ -37,7 +37,7 @@
   "layers_per_block": 1,
   "mid_block_only_cross_attention": null,
   "mid_block_scale_factor": 1,
-  "mid_block_type": "UNetMidBlock2DCrossAttn",
+  "mid_block_type": null,
   "norm_eps": 1e-05,
   "norm_num_groups": 32,
   "num_attention_heads": null,
@@ -57,7 +57,7 @@
   "transformer_layers_per_block": [
     1,
     2,
-    6
+    5
   ],
   "up_block_types": [
     "CrossAttnUpBlock2D",
