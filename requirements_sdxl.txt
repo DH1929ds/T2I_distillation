@@ -8,4 +8,3 @@ datasets==2.11.0
 peft==0.14.0
 wandb==0.15.11
 thop==0.1.1.post2209072238
-xformers

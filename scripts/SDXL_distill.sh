@@ -8,17 +8,17 @@ CUDA_VISIBLE_DEVICES=$(nvidia-smi --query-gpu=index --format=csv,noheader | past
 NUM_GPUS=$(nvidia-smi --query-gpu=name --format=csv,noheader | wc -l)
 
 MODEL_NAME="stabilityai/stable-diffusion-xl-base-1.0"
-TRAIN_DATA_DIR="./data/laion_aes/SDXL_latent_212k/SDXL_base_latents" # 절대 경로로 설정
+TRAIN_DATA_DIR="./data/laion_aes/SDXL_latent_212k/SDXL_base_latents_safetensors" # 절대 경로로 설정
 EXTRA_TEXT_DIR="./data/laion400m-meta"
 
 UNET_CONFIG_PATH="./src/unet_config_sdxl"
 
-UNET_NAME="koala700M" # option: ["bk_base", "bk_small", "bk_tiny"]
+UNET_NAME="KOALA700M" # option: ["bk_base", "bk_small", "bk_tiny"]
 OUTPUT_DIR="./results/SDXL/RC_koala700M"
 MODEL_ID="stabilityai/stable-diffusion-xl-base-1.0"
 
-BATCH_SIZE=16  # GPU당 batch size
-TOTAL_BATCH_SIZE=256  # BATCH_SIZE * GRAD_ACCUMULATION = 256이 되도록 설정
+BATCH_SIZE=8  # GPU당 batch size
+TOTAL_BATCH_SIZE=128  # BATCH_SIZE * GRAD_ACCUMULATION = 256이 되도록 설정
 GRAD_ACCUMULATION=$((TOTAL_BATCH_SIZE / (BATCH_SIZE * NUM_GPUS)))  # 동적으로 GRAD_ACCUMULATION 계산
 
 StartTime=$(date +%s)
@@ -39,16 +39,19 @@ COMMON_ARGS="
   --seed 1234 \
   --gradient_accumulation_steps $GRAD_ACCUMULATION \
   --checkpointing_steps 25000 \
+  --evaluation_step 100000000 \
   --valid_steps 10000 \
   --lambda_sd 1.0 --lambda_kd_output 1.0 --lambda_kd_feat 1.0 \
   --unet_config_path $UNET_CONFIG_PATH --unet_config_name $UNET_NAME \
   --output_dir $OUTPUT_DIR \
   --max_train_steps 400000 \
   --model_id $MODEL_ID \
+  --drop_text \
   --random_conditioning \
   --random_conditioning_lambda 5 \
   --use_copy_weight_from_teacher \
-  --dataloader_num_workers 8
+  --dataloader_num_workers 8 \
+  --safe_tensor \
   --img_sz 1024
 "
 #--drop_text

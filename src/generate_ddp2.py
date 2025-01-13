@@ -12,7 +12,7 @@ import math
 import pandas as pd
 import shutil
 
-def sample_images_30k(args, accelerator, SDXL, save_path=None):
+def sample_images_30k(args, accelerator, SDXL=None, save_path=None):
     device = accelerator.device
 
     pipeline = InferencePipeline(weight_folder=args.model_id, seed=args.clip_seed, device=device)

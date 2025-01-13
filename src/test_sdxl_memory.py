@@ -101,26 +101,24 @@ def print_memory_usage(label=""):
     reserved = torch.cuda.memory_reserved() / (1024 ** 2)    # MB 단위
     print(f"{label} Allocated: {allocated:.2f} MB, Reserved: {reserved:.2f} MB")
     return allocated
-    
+
 def SDXL_get_add_time_ids(
         unet, original_size, crops_coords_top_left, target_size, dtype, text_encoder_projection_dim=None
     ):
-    
-    unet_model = getattr(unet, "module", unet)
-    add_time_ids = list(original_size + crops_coords_top_left + target_size)
+        add_time_ids = list(original_size + crops_coords_top_left + target_size)
 
-    passed_add_embed_dim = (
-        unet_model.config.addition_time_embed_dim * len(add_time_ids) + text_encoder_projection_dim
-    )
-    expected_add_embed_dim = unet_model.add_embedding.linear_1.in_features
-
-    if expected_add_embed_dim != passed_add_embed_dim:
-        raise ValueError(
-            f"Model expects an added time embedding vector of length {expected_add_embed_dim}, but a vector of {passed_add_embed_dim} was created. The model has an incorrect config. Please check `unet.config.time_embedding_type` and `text_encoder_2.config.projection_dim`."
+        passed_add_embed_dim = (
+            unet.config.addition_time_embed_dim * len(add_time_ids) + text_encoder_projection_dim
         )
+        expected_add_embed_dim = unet.add_embedding.linear_1.in_features
 
-    add_time_ids = torch.tensor([add_time_ids], dtype=dtype)
-    return add_time_ids
+        if expected_add_embed_dim != passed_add_embed_dim:
+            raise ValueError(
+                f"Model expects an added time embedding vector of length {expected_add_embed_dim}, but a vector of {passed_add_embed_dim} was created. The model has an incorrect config. Please check `unet.config.time_embedding_type` and `text_encoder_2.config.projection_dim`."
+            )
+
+        add_time_ids = torch.tensor([add_time_ids], dtype=dtype)
+        return add_time_ids
 
 def SDXL_encode_prompt(
     unet,
@@ -663,10 +661,7 @@ def main():
         os.makedirs(args.output_dir, exist_ok=True)
 
     # Load scheduler, tokenizer and models.
-    # noise_scheduler = DDPMScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
-    noise_scheduler = DDPMScheduler(
-        beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear", num_train_timesteps=1000, clip_sample=False
-    )
+    noise_scheduler = EulerDiscreteScheduler.from_pretrained(args.pretrained_model_name_or_path, subfolder="scheduler")
     tokenizer = CLIPTokenizer.from_pretrained(
         args.pretrained_model_name_or_path, subfolder="tokenizer", revision=args.revision
     )
@@ -1047,6 +1042,9 @@ def main():
         num_training_steps=args.max_train_steps * args.gradient_accumulation_steps,
     )
 
+    print_memory_usage("Initial")
+    pre_memory = print_memory_usage("Before Code Execution")
+
     if args.channel_mapping:
         # Prepare everything with our `accelerator`.
         unet, conv_layers, optimizer, train_dataloader, lr_scheduler = accelerator.prepare(
@@ -1062,6 +1060,13 @@ def main():
             unet, optimizer, train_dataloader, lr_scheduler
         )
         
+    # 실행할 코드 후 메모리 사용량 저장
+    post_memory = print_memory_usage("After Code Execution")
+    
+    # 증가한 메모리 계산
+    memory_increase = post_memory - pre_memory
+    print(f"prepare Memory Increase: {memory_increase:.2f} MB")
+
     
     if torch.cuda.device_count() > 1:
         print(f"use multi-gpu: # gpus {torch.cuda.device_count()}")
@@ -1083,12 +1088,53 @@ def main():
     elif accelerator.mixed_precision == "bf16":
         weight_dtype = torch.bfloat16
 
+
+    # 실행할 코드 전 메모리 사용량 저장
+    pre_memory = print_memory_usage("Before Code Execution")
+
     # Move student's text_encode and vae and teacher's unet to gpu and cast to weight_dtype
     text_encoder.to(accelerator.device, dtype=weight_dtype)
+    
+    # 실행할 코드 후 메모리 사용량 저장
+    post_memory = print_memory_usage("After Code Execution")
+    
+    # 증가한 메모리 계산
+    memory_increase = post_memory - pre_memory
+    print(f"txt to device Memory Increase: {memory_increase:.2f} MB")
+
+    pre_memory = print_memory_usage("Before Code Execution")
     vae.to(accelerator.device, dtype=weight_dtype)
+
+    
+    # 실행할 코드 후 메모리 사용량 저장
+    post_memory = print_memory_usage("After Code Execution")
+    
+    # 증가한 메모리 계산
+    memory_increase = post_memory - pre_memory
+    print(f"vae to device Memory Increase: {memory_increase:.2f} MB")
+    pre_memory = print_memory_usage("Before Code Execution")
+
     unet_teacher.to(accelerator.device, dtype=weight_dtype)
+
+    
+    # 실행할 코드 후 메모리 사용량 저장
+    post_memory = print_memory_usage("After Code Execution")
+    
+    # 증가한 메모리 계산
+    memory_increase = post_memory - pre_memory
+    print(f"unet_teacher to device Memory Increase: {memory_increase:.2f} MB")
+
+    pre_memory = print_memory_usage("Before Code Execution")
     if text_encoder_2 is not None:
         text_encoder_2.to(accelerator.device, dtype=weight_dtype)
+
+    # 실행할 코드 후 메모리 사용량 저장
+    post_memory = print_memory_usage("After Code Execution")
+    
+    # 증가한 메모리 계산
+    memory_increase = post_memory - pre_memory
+    print(f"txt2 to device Memory Increase: {memory_increase:.2f} MB")
+
 
     # We need to recalculate our total training steps as the size of the training dataloader may have changed.
     num_update_steps_per_epoch = math.ceil(len(train_dataloader) / args.gradient_accumulation_steps)
@@ -1233,16 +1279,35 @@ def main():
                 ################################################## loss calculation ####################################################################
                 # Predict the noise residual 
                 if args.SDXL:
+                    
+                    pre_memory = print_memory_usage("Before Code Execution")
+
                     model_pred = unet(noisy_latents,timesteps,
                                     encoder_hidden_states=prompt_embeds,
                                     cross_attention_kwargs=cross_attention_kwargs,
                                     added_cond_kwargs=added_cond_kwargs, 
                                     return_dict=False,)[0]
+                                    
+                    # 실행할 코드 후 메모리 사용량 저장
+                    post_memory = print_memory_usage("After Code Execution")
+                    
+                    # 증가한 메모리 계산
+                    memory_increase = post_memory - pre_memory
+                    print(f"std Memory Increase: {memory_increase:.2f} MB")
+
+                    pre_memory = print_memory_usage("Before Code Execution")
                     model_pred_teacher = unet_teacher(noisy_latents,timesteps,
                                     encoder_hidden_states=prompt_embeds,
                                     cross_attention_kwargs=cross_attention_kwargs,
                                     added_cond_kwargs=added_cond_kwargs, 
                                     return_dict=False,)[0]
+                                    
+                    # 실행할 코드 후 메모리 사용량 저장
+                    post_memory = print_memory_usage("After Code Execution")
+                    
+                    # 증가한 메모리 계산
+                    memory_increase = post_memory - pre_memory
+                    print(f"teacher Memory Increase: {memory_increase:.2f} MB")
                 else:
                     model_pred = unet(noisy_latents, timesteps, encoder_hidden_states).sample
                     model_pred_teacher = unet_teacher(noisy_latents, timesteps, encoder_hidden_states).sample
@@ -1259,7 +1324,8 @@ def main():
                         loss_sd = torch.tensor(0.0, device=accelerator.device)
                 else:
                     loss_sd = torch.tensor(0.0, device=accelerator.device)  # If not using, set to zero
-
+                
+                pre_memory = print_memory_usage("Before Code Execution")
                 # Predict output-KD loss
                 loss_kd_output = F.mse_loss(model_pred.float(), model_pred_teacher.float(), reduction="mean")
 
@@ -1294,6 +1360,12 @@ def main():
                 loss = args.lambda_sd * loss_sd + args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat
                 # loss = args.lambda_kd_output * loss_kd_output + args.lambda_kd_feat * loss_kd_feat
 
+                # 실행할 코드 후 메모리 사용량 저장
+                post_memory = print_memory_usage("After Code Execution")
+                
+                # 증가한 메모리 계산
+                memory_increase = post_memory - pre_memory
+                print(f"cal loss Memory Increase: {memory_increase:.2f} MB")
                 ################################################## loss calculation ####################################################################
 
                 # Gather the losses across all processes for logging (if we use distributed training).
@@ -1309,13 +1381,29 @@ def main():
                 avg_loss_kd_feat = accelerator.gather(loss_kd_feat.repeat(args.train_batch_size)).mean()
                 train_loss_kd_feat += avg_loss_kd_feat.item() / args.gradient_accumulation_steps
 
+                pre_memory = print_memory_usage("Before Code Execution")
                 # Backpropagate
                 accelerator.backward(loss)
+                # 실행할 코드 후 메모리 사용량 저장
+                post_memory = print_memory_usage("After Code Execution")
+                
+                # 증가한 메모리 계산
+                memory_increase = post_memory - pre_memory
+                print(f"backward Memory Increase: {memory_increase:.2f} MB")
                 if accelerator.sync_gradients:
                     accelerator.clip_grad_norm_(unet.parameters(), args.max_grad_norm)
+                pre_memory = print_memory_usage("Before Code Execution")
                 optimizer.step()
+                post_memory = print_memory_usage("After opt step Execution")
                 lr_scheduler.step()
+                post_memory = print_memory_usage("After lr Execution")
                 optimizer.zero_grad()
+                # 실행할 코드 후 메모리 사용량 저장
+                post_memory = print_memory_usage("After opt zero Execution")
+                
+                # 증가한 메모리 계산
+                memory_increase = post_memory - pre_memory
+                print(f"step Memory Increase: {memory_increase:.2f} MB")
 
             # Checks if the accelerator has performed an optimization step behind the scenes
             if accelerator.sync_gradients:
@@ -1413,9 +1501,6 @@ def main():
                 accelerator.wait_for_everyone()
                 # save validation images
                 if (args.valid_prompt is not None) and (global_step % args.valid_steps == 0) and accelerator.is_main_process:
-                    post_memory = print_memory_usage("After opt zero Execution")
-                    torch.cuda.empty_cache()
-                    post_memory = print_memory_usage("After opt zero Execution")
                     logger.info(
                         f"Running validation... \n Generating {args.num_valid_images} images with prompt:"
                         f" {args.valid_prompt}."
@@ -1440,8 +1525,8 @@ def main():
                     generator = torch.Generator(device=accelerator.device).manual_seed(args.seed)
 
                     if not os.path.exists(os.path.join(val_img_dir, "teacher_0.png")):
-                        for kk, prompt in enumerate(args.valid_prompts):
-                            image = pipeline(prompt, num_inference_steps=25, generator=generator).images[0]
+                        for kk in range(args.num_valid_images):
+                            image = pipeline(args.valid_prompt, num_inference_steps=25, generator=generator).images[0]
                             tmp_name = os.path.join(val_img_dir, f"teacher_{kk}.png")
                             image.save(tmp_name)
 

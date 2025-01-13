@@ -3,13 +3,14 @@ import math
 import torch
 import pandas as pd
 from torch.utils.data import Dataset
+from safetensors.torch import load_file
 import random
 import numpy as np
 
 class x0_dataset(Dataset):
     def __init__(self, data_dir, extra_text_dir=None, n_T=1000, random_conditioning = False, 
                  random_conditioning_lambda=5, world_size=1, rank=0, drop_text=True, drop_text_p=0.1, 
-                 use_unseen_setting=False, gpt_caption=False, max_extra_text_samples=None):
+                 use_unseen_setting=False, gpt_caption=False, max_extra_text_samples=None, safe_tensor=None):
         """
         Args:
             data_dir (str): 데이터가 저장된 폴더의 경로.
@@ -25,6 +26,7 @@ class x0_dataset(Dataset):
         self.drop_text_p = drop_text_p
         self.gpt_caption = gpt_caption
         self.max_extra_text_samples = max_extra_text_samples
+        self.safe_tensor = safe_tensor
         
         # Select metadata - Using unseen setting or not
         
@@ -124,12 +126,19 @@ class x0_dataset(Dataset):
         file_name = metadata_row['file_name']
         text = metadata_row['text']
 
-        # Modify the file_name to get latent file name
-        latent_file_name = file_name.replace('.jpg', '_latent.pt')
-        latent_path = os.path.join(self.data_dir, latent_file_name)
-        
-        latent_tensor = torch.load(latent_path)
-        
+        if self.safe_tensor:
+            latent_file_name = file_name.replace('.jpg', '_latent.safetensors')
+            latent_path = os.path.join(self.data_dir, latent_file_name)
+            data = load_file(latent_path)
+            latent_tensor = data["tensor"]
+
+        else:
+            # Modify the file_name to get latent file name
+            latent_file_name = file_name.replace('.jpg', '_latent.pt')
+            latent_path = os.path.join(self.data_dir, latent_file_name)
+            
+            latent_tensor = torch.load(latent_path, map_location=torch.device('cpu'))
+
         timestep = torch.randint(0, self.n_T, (1,)).long()        
         paired = torch.tensor(1).unsqueeze(0)
         if self.random_conditioning:
@@ -156,7 +165,7 @@ class x0_dataset(Dataset):
         return latent_tensor, text, timestep, paired
 
 
-def collate_fn(tokenizer, tokenizer_2):
+def collate_fn(tokenizer, tokenizer_2=None):
     def collate(batch):
         latents, texts, timesteps, paireds = zip(*batch)
         
